@@ -50,6 +50,17 @@ class Settings(BaseSettings):
     callback_allowed_schemes: tuple[str, ...] = ("https", "http")
     callback_block_private_networks: bool = True
 
+    # Confidence / acceptance
+    default_min_confidence: float = 0.6
+
+    # Usable-lead definition (docs/benchmarks/metric-definitions.md) — configurable so
+    # cost-per-usable-lead can be re-derived under different definitions.
+    usable_lead_require_company: bool = True
+    usable_lead_require_valid_domain: bool = True
+    usable_lead_require_contact_name: bool = True
+    usable_lead_require_title_or_seniority: bool = True
+    usable_lead_min_confidence: float = 0.6
+
     @property
     def webhook_secret_list(self) -> list[str]:
         return [s.strip() for s in self.webhook_secrets.split(",") if s.strip()]

@@ -29,6 +29,7 @@ class PreDecision(StrEnum):
 
 class JobStatus(StrEnum):
     RECEIVED = "received"
+    QUEUED = "queued"
     RUNNING = "running"
     AWAITING_REVIEW = "awaiting_review"
     COMPLETED = "completed"
@@ -111,12 +112,16 @@ class SyncGateOutcome(StrEnum):
     SECONDARY_PROPERTY = "secondary_property"
     REQUIRE_APPROVAL = "require_approval"
     PRESERVE_CRM = "preserve_crm"
-    REFRESH_LATER = "refresh_later"
+    MARK_REFRESH = "mark_refresh"
+
+
+GateOutcome = SyncGateOutcome  # canonical short name used across services
 
 
 class SyncStatus(StrEnum):
     PENDING = "pending"
     SUCCESS = "success"
+    RETRYING = "retrying"
     FAILED = "failed"
     SKIPPED = "skipped"
 

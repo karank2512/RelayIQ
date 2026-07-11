@@ -34,6 +34,7 @@ class DecisionInput:
     budget_state: BudgetState
     providers_available: bool
     estimated_min_cost: float
+    current_job_id: str | None = None  # excluded from the duplicate in-flight check
 
 
 @dataclass
@@ -170,14 +171,15 @@ def decide(session: Session, inp: DecisionInput) -> DecisionOutput:
 
     # 5. Duplicate in-flight work on the same entity (cheap dedupe; idempotency keys
     #    handle exact duplicates — this catches concurrent different-key submissions)
-    inflight = session.execute(
-        select(EnrichmentJob.id).where(
-            EnrichmentJob.tenant_id == inp.tenant_id,
-            EnrichmentJob.entity_type == inp.entity_type,
-            EnrichmentJob.entity_id == inp.entity_id,
-            EnrichmentJob.status == JobStatus.RUNNING.value,
-        ).limit(1)
-    ).scalar_one_or_none()
+    inflight_q = select(EnrichmentJob.id).where(
+        EnrichmentJob.tenant_id == inp.tenant_id,
+        EnrichmentJob.entity_type == inp.entity_type,
+        EnrichmentJob.entity_id == inp.entity_id,
+        EnrichmentJob.status == JobStatus.RUNNING.value,
+    )
+    if inp.current_job_id:
+        inflight_q = inflight_q.where(EnrichmentJob.id != inp.current_job_id)
+    inflight = session.execute(inflight_q.limit(1)).scalar_one_or_none()
     if inflight:
         return DecisionOutput(
             PreDecision.SKIP, [*reasons, f"another enrichment job ({inflight}) is already running for this entity"],

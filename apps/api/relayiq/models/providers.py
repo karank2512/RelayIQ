@@ -97,4 +97,7 @@ class ProviderHealthWindow(Base, PKMixin, TimestampMixin):
     p50_latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     p95_latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     p99_latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Bounded latency sample (<=500 values) for percentile computation within the window
+    latency_reservoir: Mapped[list | None] = mapped_column(JSONVariant, nullable=True)
+    total_cost_credits: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
