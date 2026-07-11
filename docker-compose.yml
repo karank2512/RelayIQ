@@ -1,0 +1,105 @@
+name: relayiq
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: relayiq
+      POSTGRES_PASSWORD: relayiq_dev_password
+      POSTGRES_DB: relayiq
+    ports:
+      # Host port 5433 avoids clashing with a locally installed Postgres on 5432
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relayiq -d relayiq"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build:
+      context: apps/api
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m relayiq.seed.cli --if-empty &&
+             uvicorn relayiq.main:app --host 0.0.0.0 --port 8000"
+    environment: &backend_env
+      RELAYIQ_ENV: development
+      DATABASE_URL: postgresql+psycopg://relayiq:relayiq_dev_password@postgres:5432/relayiq
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      RELAYIQ_JWT_SECRET: ${RELAYIQ_JWT_SECRET:-dev_only_jwt_secret_do_not_use_in_prod}
+      RELAYIQ_WEBHOOK_SECRETS: ${RELAYIQ_WEBHOOK_SECRETS:-dev_only_webhook_secret}
+      RELAYIQ_SYNTHETIC_WORLD_PATH: /app/data/synthetic_world.json
+      RELAYIQ_METRICS_ENABLED: "true"
+    ports:
+      - "8000:8000"
+    volumes:
+      - worlddata:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: apps/api
+    command: celery -A relayiq.workers.celery_app worker -l info -Q enrichment,sync --concurrency=4
+    environment: *backend_env
+    volumes:
+      - worlddata:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: apps/dashboard
+      args:
+        VITE_API_BASE_URL: ""
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  pgdata:
+  worlddata:
