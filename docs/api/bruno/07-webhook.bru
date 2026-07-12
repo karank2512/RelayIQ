@@ -1,0 +1,20 @@
+meta {
+  name: 07 Signed webhook (see README to generate signature)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/v1/webhooks/enrichment
+  body: json
+  auth: none
+}
+
+headers {
+  X-RelayIQ-Signature: REPLACE_WITH_GENERATED_SIGNATURE
+  X-Delivery-Id: bruno-delivery-001
+}
+
+body:json {
+  {"event":"enrichment.requested","tenant_slug":"demo","entity_type":"contact","entity":{"work_email":"jordan.calloway@meridianrobotics.test","full_name":"Jordan Calloway"},"requested_fields":["job_title","seniority"]}
+}

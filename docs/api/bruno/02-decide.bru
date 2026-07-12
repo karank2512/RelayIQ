@@ -1,0 +1,27 @@
+meta {
+  name: 02 Enrichment decide (dry-run)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/v1/enrichment/decide
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "entity_type": "contact",
+    "entity": {
+      "work_email": "jordan.calloway@meridianrobotics.test",
+      "full_name": "Jordan Calloway",
+      "company_domain": "meridianrobotics.test"
+    },
+    "requested_fields": ["job_title", "seniority", "department"]
+  }
+}

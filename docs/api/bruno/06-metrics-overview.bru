@@ -1,0 +1,15 @@
+meta {
+  name: 06 Metrics overview
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/v1/metrics/overview
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}

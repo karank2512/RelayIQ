@@ -1,0 +1,15 @@
+meta {
+  name: 05 Review queue
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/v1/review/queue?status=pending
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}

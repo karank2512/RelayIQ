@@ -1,0 +1,22 @@
+meta {
+  name: 01 Login (operator)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/v1/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "operator@demo.relayiq.test",
+    "password": "relayiq-demo-password"
+  }
+}
+
+script:post-response {
+  bru.setVar("token", res.body.access_token);
+}

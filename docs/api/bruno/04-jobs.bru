@@ -1,0 +1,15 @@
+meta {
+  name: 04 List jobs
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/v1/enrichment/jobs?limit=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}

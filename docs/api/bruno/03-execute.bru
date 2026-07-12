@@ -1,0 +1,32 @@
+meta {
+  name: 03 Enrichment execute (sync, idempotent)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/v1/enrichment/execute
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+headers {
+  Idempotency-Key: bruno-demo-001
+}
+
+body:json {
+  {
+    "entity_type": "contact",
+    "entity": {
+      "work_email": "jordan.calloway@meridianrobotics.test",
+      "full_name": "Jordan Calloway",
+      "company_domain": "meridianrobotics.test"
+    },
+    "requested_fields": ["job_title", "seniority", "department", "linkedin_url"],
+    "mode": "sync"
+  }
+}
