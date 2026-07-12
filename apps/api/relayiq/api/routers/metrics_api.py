@@ -145,7 +145,7 @@ def campaign_economics(
                 "limit_credits": float(b.limit_credits),
                 "spent_credits": float(b.spent_credits),
                 "reserved_credits": float(b.reserved_credits),
-                "remaining_credits": float(b.limit_credits) - float(b.spent_credits) - float(b.reserved_credits),
+                "remaining_credits": float(b.limit_credits) - float(b.spent_credits) - float(b.reserved_credits),  # noqa: E501
                 "variance_credits": float(b.limit_credits) - float(b.spent_credits),
                 "warning_threshold": b.warning_threshold,
             }

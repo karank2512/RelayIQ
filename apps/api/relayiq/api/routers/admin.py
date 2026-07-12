@@ -2,7 +2,7 @@
 campaigns, budgets. Mutations require admin (providers/budgets) or operator (campaigns)."""
 
 import yaml
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session

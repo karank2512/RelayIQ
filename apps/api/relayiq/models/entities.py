@@ -99,6 +99,6 @@ class CanonicalFieldValue(Base, PKMixin, TenantMixin, TimestampMixin):
     selected_observation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     reconciliation_decision_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     staleness_state: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
-    source_kind: Mapped[str] = mapped_column(String(20), nullable=False, default="provider")  # provider|crm|manual
+    source_kind: Mapped[str] = mapped_column(String(20), nullable=False, default="provider")  # provider|crm|manual  # noqa: E501
     locked: Mapped[bool] = mapped_column(default=False, nullable=False)  # manual lock blocks CRM overwrite
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -19,7 +19,8 @@ selection is explainable after the fact.
 health, p95 latency — with cost; the other strategies use static priors only.
 """
 
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session

@@ -8,7 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from relayiq.api.routers import admin, auth, crm_api, enrichment, entities, metrics_api, misc, review, webhooks
+from relayiq.api.routers import (
+    admin,
+    auth,
+    crm_api,
+    enrichment,
+    entities,
+    metrics_api,
+    misc,
+    review,
+    webhooks,
+)
 from relayiq.config import get_settings
 from relayiq.logging_setup import configure_logging, correlation_id_var, get_logger
 from relayiq.observability.metrics import HTTP_LATENCY, HTTP_REQUESTS

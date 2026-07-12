@@ -157,7 +157,7 @@ class SimulatedProvider(ProviderAdapter):
         if rng.random() < self.timeout_rate or latency > timeout_ms:
             return _fail(ProviderOutcome.TIMEOUT, "simulated timeout", retryable=True)
         if rng.random() < self.perm_fail_rate:
-            return _fail(ProviderOutcome.PERM_FAIL, "simulated permanent error (bad request)", retryable=False)
+            return _fail(ProviderOutcome.PERM_FAIL, "simulated permanent error (bad request)", retryable=False)  # noqa: E501
 
         record = self._lookup(entity_type, entity_key)
         values: dict[str, ProviderFieldValue] = {}
@@ -199,7 +199,7 @@ class SimulatedProvider(ProviderAdapter):
     def _rng(self, entity_key: str, fields: list[str]) -> random.Random:
         material = f"{self.seed}:{self.key}:{entity_key}:{','.join(sorted(fields))}"
         digest = hashlib.sha256(material.encode()).hexdigest()
-        return random.Random(int(digest[:16], 16))
+        return random.Random(int(digest[:16], 16))  # noqa: S311 — deterministic simulation, not crypto
 
     def _lookup(self, entity_type: str, entity_key: str) -> dict | None:
         if not entity_key:

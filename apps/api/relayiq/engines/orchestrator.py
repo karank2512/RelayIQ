@@ -25,7 +25,6 @@ from relayiq.enums import (
     JobStatus,
     PreDecision,
     ReconciliationOutcome,
-    StalenessState,
     StepStatus,
 )
 from relayiq.logging_setup import get_logger
@@ -177,7 +176,7 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
     if decision.decision != PreDecision.ENRICH:
         # Terminal without provider spend. Cache-served fields get zero-cost ledger entries
         # with the avoided cost measured from live provider pricing.
-        for f, info in decision.fields_from_cache.items():
+        for f in decision.fields_from_cache:
             avoided = _cheapest_cost(registry, job.entity_type, f)
             ledger.record_entry(
                 session, tenant_id=job.tenant_id, operation="enrich_field",
@@ -341,7 +340,7 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
                     _reroute(remaining, missing, provider_key, attempted_pairs, next_plan)
             plan = next_plan
         # Fields nobody could fill → negative cache (avoid re-buying known-empty lookups).
-        for f in remaining:
+        for f in remaining:  # noqa: B007 — key iteration
             if f not in observations_by_field:
                 cache.set_negative(job.tenant_id, job.entity_type, entity_key, f)
         step.detail = {
@@ -501,7 +500,7 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
     # ── 9. Finalize: ledger acceptance, budget commit, job bookkeeping ────
     with steps.run("finalize") as step:
         accepted_by_provider: dict[str, bool] = {}
-        for f, obs_list in observations_by_field.items():
+        for obs_list in observations_by_field.values():
             for o in obs_list:
                 accepted_by_provider[o.provider_key] = (
                     accepted_by_provider.get(o.provider_key, False) or o.is_selected

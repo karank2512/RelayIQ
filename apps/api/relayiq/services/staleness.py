@@ -37,7 +37,7 @@ DEFAULTS: dict[tuple[str, str], Thresholds] = {
 FALLBACK = Thresholds(90, 180, 365)
 
 
-def get_thresholds(session: Session | None, tenant_id: str | None, entity_type: str, field_name: str) -> Thresholds:
+def get_thresholds(session: Session | None, tenant_id: str | None, entity_type: str, field_name: str) -> Thresholds:  # noqa: E501
     if session is not None:
         rows = session.execute(
             select(StalenessPolicy).where(

@@ -256,16 +256,16 @@ def derive_seniority(title: str | None) -> str:
 # Ordered: first match wins. revops must precede sales/operations so that
 # "sales operations" and "revenue operations" don't fall through.
 _DEPARTMENT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("revops", re.compile(r"\brevenue operations\b|\brev ops\b|\brevops\b|\bsales operations\b|\bsales ops\b")),
+    ("revops", re.compile(r"\brevenue operations\b|\brev ops\b|\brevops\b|\bsales operations\b|\bsales ops\b")),  # noqa: E501
     ("customer_success", re.compile(r"\bcustomer success\b|\bcustomer experience\b|\bcsm\b")),
-    ("sales", re.compile(r"\bsales\b|\baccount executive\b|\bsdr\b|\bbdr\b|\bbusiness development\b|\bcro\b")),
-    ("marketing", re.compile(r"\bmarketing\b|\bgrowth\b|\bbrand\b|\bcontent\b|\bdemand generation\b|\bcmo\b|\bseo\b")),
-    ("engineering", re.compile(r"\bengineering\b|\bengineer\b|\bdeveloper\b|\bsoftware\b|\bdevops\b|\bsre\b|\bcto\b|\bqa\b")),
+    ("sales", re.compile(r"\bsales\b|\baccount executive\b|\bsdr\b|\bbdr\b|\bbusiness development\b|\bcro\b")),  # noqa: E501
+    ("marketing", re.compile(r"\bmarketing\b|\bgrowth\b|\bbrand\b|\bcontent\b|\bdemand generation\b|\bcmo\b|\bseo\b")),  # noqa: E501
+    ("engineering", re.compile(r"\bengineering\b|\bengineer\b|\bdeveloper\b|\bsoftware\b|\bdevops\b|\bsre\b|\bcto\b|\bqa\b")),  # noqa: E501
     ("product", re.compile(r"\bproduct\b|\bdesign\b|\bux\b|\bcpo\b")),
-    ("finance", re.compile(r"\bfinance\b|\bfinancial\b|\baccounting\b|\baccountant\b|\bcontroller\b|\bcfo\b|\btreasury\b")),
-    ("hr", re.compile(r"\bhuman resources\b|\bhr\b|\bpeople\b|\btalent\b|\brecruit(?:er|ing|ment)\b|\bchro\b")),
+    ("finance", re.compile(r"\bfinance\b|\bfinancial\b|\baccounting\b|\baccountant\b|\bcontroller\b|\bcfo\b|\btreasury\b")),  # noqa: E501
+    ("hr", re.compile(r"\bhuman resources\b|\bhr\b|\bpeople\b|\btalent\b|\brecruit(?:er|ing|ment)\b|\bchro\b")),  # noqa: E501
     ("operations", re.compile(r"\boperations\b|\bops\b|\bsupply chain\b|\blogistics\b|\bcoo\b")),
-    ("it", re.compile(r"\binformation technology\b|\bit\b|\bsecurity\b|\binfosec\b|\bciso\b|\bcio\b|\bsysadmin\b")),
+    ("it", re.compile(r"\binformation technology\b|\bit\b|\bsecurity\b|\binfosec\b|\bciso\b|\bcio\b|\bsysadmin\b")),  # noqa: E501
     ("legal", re.compile(r"\blegal\b|\bcounsel\b|\battorney\b|\bcompliance\b|\bparalegal\b")),
 )
 

@@ -20,7 +20,7 @@ class ErrorResponse(BaseModel):
     correlation_id: str | None = None
 
 
-class Page(BaseModel, Generic[T]):
+class Page(BaseModel, Generic[T]):  # noqa: UP046 — runtime Generic keeps Pydantic v2 compat
     items: list[T]
     total: int
     limit: int

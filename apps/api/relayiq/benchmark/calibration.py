@@ -20,13 +20,13 @@ from relayiq.benchmark.runner import (
     CONTACT_FIELDS,
     PROVIDER_PRIORS,
     STATIC_ROUTES,
+    StrategyResult,
     _call,
     _is_prefiltered,
     _mk_providers,
     _obs_from_call,
     _thresholds,
     _truth_correct,
-    StrategyResult,
 )
 from relayiq.engines.confidence import FieldConfidenceInput, score_field
 from relayiq.engines.reconciliation import reconcile_field

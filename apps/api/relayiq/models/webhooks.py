@@ -17,7 +17,7 @@ class WebhookDelivery(Base, PKMixin, TenantMixin, TimestampMixin):
     signature_valid: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     timestamp_valid: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_duplicate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="received")  # received|processed|rejected
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="received")  # received|processed|rejected  # noqa: E501
     reject_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     # Minimal event metadata only — full payloads are not retained (ADR-012)

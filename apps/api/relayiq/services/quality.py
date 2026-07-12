@@ -24,7 +24,7 @@ from relayiq.models import (
 )
 
 
-def _canon(session: Session, tenant_id: str, entity_type: str, entity_id: str) -> dict[str, CanonicalFieldValue]:
+def _canon(session: Session, tenant_id: str, entity_type: str, entity_id: str) -> dict[str, CanonicalFieldValue]:  # noqa: E501
     rows = session.execute(
         select(CanonicalFieldValue).where(
             CanonicalFieldValue.tenant_id == tenant_id,

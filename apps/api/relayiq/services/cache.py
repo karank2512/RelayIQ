@@ -178,7 +178,7 @@ class FieldCache:
     ) -> None:
         key = f"{self.prefix}:lock:{tenant_id}:{entity_type}:{entity_key.lower()}:{field}"
         # Compare-and-delete via Lua so we never release someone else's lock.
-        script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
+        script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"  # noqa: E501
         self.r.eval(script, 1, key, token)
 
     # -- metrics -----------------------------------------------------------------

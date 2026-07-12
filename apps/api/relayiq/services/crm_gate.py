@@ -5,7 +5,8 @@ Each field decision carries reasons; the whole gate summary is stored on the syn
 Never silently overwrite a fresh CRM value with lower-confidence enrichment.
 """
 
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from datetime import UTC, datetime
 
 from relayiq.canonical.normalize import values_equivalent

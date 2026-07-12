@@ -28,8 +28,8 @@ from relayiq.enums import ReconciliationOutcome
 from relayiq.models import FieldObservation
 from relayiq.providers.base import EnrichmentCallResult
 from relayiq.providers.simulators import SimulatedProvider, make_alpha, make_beta
-from relayiq.services.staleness import DEFAULTS, FALLBACK, freshness_factor
 from relayiq.seed.worldgen import generate_world, write_world
+from relayiq.services.staleness import DEFAULTS, FALLBACK, freshness_factor
 
 CONTACT_FIELDS = ["job_title", "seniority", "department", "linkedin_url"]
 PROVIDER_PRIORS = {"alpha": 0.86, "beta": 0.9}
@@ -195,7 +195,7 @@ def _thresholds(field_name: str):
 
 
 def _make_stream(world: dict, duplicate_submission_rate: float, seed: int) -> list[dict]:
-    rng = random.Random(seed + 1)
+    rng = random.Random(seed + 1)  # noqa: S311 — deterministic simulation, not crypto
     contacts = list(world["contacts"])
     stream = list(contacts)
     n_dupes = int(len(contacts) * duplicate_submission_rate)
@@ -378,7 +378,7 @@ def _route_and_reconcile(stream, companies, providers, res, *, routes_for, cross
             elif recon.outcome == ReconciliationOutcome.REQUIRE_REVIEW:
                 needs_review = True
 
-        entity_conf = score_entity(field_scores, requested_fields=CONTACT_FIELDS).score if field_scores else 0.0
+        entity_conf = score_entity(field_scores, requested_fields=CONTACT_FIELDS).score if field_scores else 0.0  # noqa: E501
         if needs_review or entity_conf < MIN_CONFIDENCE:
             res.review_records += 1
             cache[contact["world_id"]] = delivered  # cache what we have; lead not counted usable
@@ -416,7 +416,7 @@ def _dynamic(stream, companies, providers) -> StrategyResult:
         "dynamic_routing",
         "learned field-level provider choice from warmup precision/cost, then full pipeline",
     )
-    rng = random.Random(99)
+    rng = random.Random(99)  # noqa: S311 — deterministic simulation, not crypto
     unique = list({c["world_id"]: c for c in stream}.values())
     warmup = rng.sample(unique, max(5, int(len(unique) * 0.15)))
     stats: dict[tuple[str, str], list[int]] = {}

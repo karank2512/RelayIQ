@@ -65,7 +65,7 @@ def record_entry(
 def mark_acceptance(session: Session, job_id: str, accepted_by_provider: dict[str, bool]) -> None:
     """After reconciliation: flag which providers' spend produced accepted values."""
     entries = session.execute(
-        select(CostLedgerEntry).where(CostLedgerEntry.job_id == job_id, CostLedgerEntry.provider_key.isnot(None))
+        select(CostLedgerEntry).where(CostLedgerEntry.job_id == job_id, CostLedgerEntry.provider_key.isnot(None))  # noqa: E501
     ).scalars()
     for e in entries:
         if e.provider_key in accepted_by_provider:
@@ -88,8 +88,8 @@ def cost_summary(session: Session, tenant_id: str, campaign_id: str | None = Non
     q = select(
         func.coalesce(func.sum(CostLedgerEntry.actual_cost_credits), 0),
         func.coalesce(func.sum(CostLedgerEntry.avoided_cost_credits), 0),
-        func.coalesce(func.sum(case((CostLedgerEntry.was_redundant, CostLedgerEntry.actual_cost_credits), else_=0)), 0),
-        func.coalesce(func.sum(case((CostLedgerEntry.spent_on_stale, CostLedgerEntry.actual_cost_credits), else_=0)), 0),
+        func.coalesce(func.sum(case((CostLedgerEntry.was_redundant, CostLedgerEntry.actual_cost_credits), else_=0)), 0),  # noqa: E501
+        func.coalesce(func.sum(case((CostLedgerEntry.spent_on_stale, CostLedgerEntry.actual_cost_credits), else_=0)), 0),  # noqa: E501
         func.coalesce(func.sum(
             case((CostLedgerEntry.record_rejected_later, CostLedgerEntry.actual_cost_credits), else_=0)), 0),
         func.count(CostLedgerEntry.id),

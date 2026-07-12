@@ -158,7 +158,7 @@ class IdempotencyRecord(Base, PKMixin, TenantMixin, TimestampMixin):
     scope: Mapped[str] = mapped_column(String(40), nullable=False)  # enrichment|webhook|crm_sync|review
     key: Mapped[str] = mapped_column(String(200), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default=IdempotencyStatus.IN_PROGRESS.value)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=IdempotencyStatus.IN_PROGRESS.value)  # noqa: E501
     response_snapshot: Mapped[dict | None] = mapped_column(JSONVariant, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

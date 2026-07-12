@@ -5,7 +5,8 @@ Checks run cheapest-first; the first terminal check wins, remaining reasons stil
 where helpful for operators.
 """
 
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -16,7 +17,7 @@ from relayiq.canonical.normalize import (
     is_valid_domain,
     is_valid_email_syntax,
 )
-from relayiq.enums import EntityType, JobStatus, PreDecision, StalenessState
+from relayiq.enums import EntityType, JobStatus, PreDecision
 from relayiq.models import Campaign, CanonicalFieldValue, EnrichmentJob
 from relayiq.services import policy as policy_service
 from relayiq.services import staleness as staleness_service
@@ -116,7 +117,7 @@ def decide(session: Session, inp: DecisionInput) -> DecisionOutput:
         campaign_restrictions=(inp.campaign.filters if inp.campaign else None),
     )
     if not pol.allowed:
-        return DecisionOutput(PreDecision.POLICY_BLOCK, pol.reasons, job_status=JobStatus.BLOCKED_POLICY.value)
+        return DecisionOutput(PreDecision.POLICY_BLOCK, pol.reasons, job_status=JobStatus.BLOCKED_POLICY.value)  # noqa: E501
     requested = [f for f in inp.requested_fields if f not in set(pol.blocked_fields)]
     if pol.blocked_fields:
         reasons.append(f"dropped policy-restricted fields: {sorted(pol.blocked_fields)}")
@@ -147,7 +148,7 @@ def decide(session: Session, inp: DecisionInput) -> DecisionOutput:
     # 3. Syntax validity — spending credits on malformed identifiers is waste
     if email and not is_valid_email_syntax(email):
         return DecisionOutput(
-            PreDecision.REJECT, [*reasons, f"work email failed syntax validation"],
+            PreDecision.REJECT, [*reasons, "work email failed syntax validation"],
             job_status=JobStatus.REJECTED.value,
         )
     raw_domainish = inp.identifiers.get("root_domain")
@@ -182,7 +183,7 @@ def decide(session: Session, inp: DecisionInput) -> DecisionOutput:
     inflight = session.execute(inflight_q.limit(1)).scalar_one_or_none()
     if inflight:
         return DecisionOutput(
-            PreDecision.SKIP, [*reasons, f"another enrichment job ({inflight}) is already running for this entity"],
+            PreDecision.SKIP, [*reasons, f"another enrichment job ({inflight}) is already running for this entity"],  # noqa: E501
             job_status=JobStatus.SKIPPED.value,
         )
 

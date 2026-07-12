@@ -279,7 +279,7 @@ def generate_world(
             companies.append(dup)
         elif rng.random() < 0.04 and i > 0:
             src = companies[rng.randrange(len(companies) - 1)]
-            sub_name = f"{src['truth']['name'].split(' ')[0]} {rng.choice(NOUNS)} {rng.choice(['Labs', 'Services'])}"
+            sub_name = f"{src['truth']['name'].split(' ')[0]} {rng.choice(NOUNS)} {rng.choice(['Labs', 'Services'])}"  # noqa: E501
             sub_slug = _slug(sub_name)
             sub_truth = dict(truth)
             sub_truth.update({

@@ -170,7 +170,7 @@ def reconcile_field(
     if crm_value is not None and crm_fresh:
         crm_in_top = values_equivalent(field_name, crm_value, str(chosen_val))
         crm_anywhere = any(
-            values_equivalent(field_name, crm_value, str(g[0].observation.normalized_value or g[0].observation.raw_value))
+            values_equivalent(field_name, crm_value, str(g[0].observation.normalized_value or g[0].observation.raw_value))  # noqa: E501
             for g in groups
         )
         if not crm_anywhere and severity >= 0.5:
@@ -215,4 +215,4 @@ def reconcile_field(
         + f". Margin {margin:.0%} below auto-accept bar or severity {severity:.2f} too high — "
         f"routed to human review with '{chosen_val}' suggested."
     )
-    return ReconcileResult(ReconciliationOutcome.REQUIRE_REVIEW, chosen, reasoning, factors, severity, agreement)
+    return ReconcileResult(ReconciliationOutcome.REQUIRE_REVIEW, chosen, reasoning, factors, severity, agreement)  # noqa: E501

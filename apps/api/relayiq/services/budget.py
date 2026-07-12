@@ -58,7 +58,7 @@ def _rollover_if_needed(session: Session, budget: Budget) -> None:
         session.execute(
             update(Budget)
             .where(Budget.id == budget.id, Budget.period_start == budget.period_start)
-            .values(spent_credits=0, reserved_credits=0, period_start=now.replace(hour=0, minute=0, second=0, microsecond=0))
+            .values(spent_credits=0, reserved_credits=0, period_start=now.replace(hour=0, minute=0, second=0, microsecond=0))  # noqa: E501
         )
         session.commit()
         session.refresh(budget)

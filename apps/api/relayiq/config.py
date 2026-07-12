@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     webhook_secrets: str = Field(default="dev_only_webhook_secret", alias="RELAYIQ_WEBHOOK_SECRETS")
     webhook_replay_window_seconds: int = Field(default=300, alias="RELAYIQ_WEBHOOK_REPLAY_WINDOW_SECONDS")
 
-    synthetic_world_path: str = Field(default="./data/synthetic_world.json", alias="RELAYIQ_SYNTHETIC_WORLD_PATH")
+    synthetic_world_path: str = Field(default="./data/synthetic_world.json", alias="RELAYIQ_SYNTHETIC_WORLD_PATH")  # noqa: E501
     provider_sim_seed: int = Field(default=42, alias="RELAYIQ_PROVIDER_SIM_SEED")
 
     hubspot_access_token: str = Field(default="", alias="HUBSPOT_ACCESS_TOKEN")

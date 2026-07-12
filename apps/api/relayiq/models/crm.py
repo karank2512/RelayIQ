@@ -14,7 +14,7 @@ class CrmConnection(Base, PKMixin, TenantMixin, TimestampMixin):
 
     system: Mapped[str] = mapped_column(String(20), nullable=False, default=CrmSystem.SIMULATOR.value)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
-    mode: Mapped[str] = mapped_column(String(20), nullable=False, default="simulator")  # simulator|live|dry_run
+    mode: Mapped[str] = mapped_column(String(20), nullable=False, default="simulator")  # simulator|live|dry_run  # noqa: E501
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Non-secret config only (property mappings, rate limits). Credentials live in env/secret store.
     config: Mapped[dict] = mapped_column(JSONVariant, default=dict, nullable=False)

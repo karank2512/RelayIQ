@@ -23,7 +23,8 @@ Entity-level = weighted mean of field scores (required fields weight 2.0, others
 Sync-level   = min(entity, min over synced fields) with unresolved-conflict penalty.
 """
 
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 
 FORMULA_VERSION = "rules-v1"
 
