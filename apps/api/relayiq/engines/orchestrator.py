@@ -81,10 +81,15 @@ class _StepRecorder:
                 return ctx.step
 
             def __exit__(ctx, exc_type, exc, tb):
+                if exc:
+                    # The step may have poisoned the transaction — roll back before we
+                    # record the failure, otherwise the bookkeeping commit itself raises.
+                    recorder.session.rollback()
                 ctx.step.finished_at = datetime.now(UTC)
                 ctx.step.status = StepStatus.FAILED.value if exc else StepStatus.COMPLETED.value
                 if exc:
                     ctx.step.detail = {**(ctx.step.detail or {}), "error": str(exc)[:500]}
+                    recorder.session.add(ctx.step)
                 ctx.span.end()
                 recorder.session.commit()
                 return False
@@ -339,6 +344,61 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
                 if missing:
                     _reroute(remaining, missing, provider_key, attempted_pairs, next_plan)
             plan = next_plan
+
+        # Staleness cross-check: for conflict-prone fields, when the only answer is past
+        # its freshness window, buy a second opinion from the next candidate so the
+        # reconciliation engine has real cross-provider evidence (policy-configurable).
+        cross_fields = set(
+            policy.get("defaults", {}).get("cross_check_stale_fields", ["job_title"])
+        )
+        cross_checked: list[str] = []
+        for f in cross_fields & set(observations_by_field):
+            obs_list = observations_by_field[f]
+            if len(obs_list) != 1:
+                continue
+            primary = obs_list[0]
+            age = _obs_age_days(primary)
+            thresholds = staleness.get_thresholds(session, job.tenant_id, job.entity_type, f)
+            if age is None or age <= thresholds.fresh_days:
+                continue
+            route = remaining.get(f)
+            candidates = [
+                c.provider_key for c in (route.candidates if route else [])
+                if c.provider_key != primary.provider_key
+            ]
+            if not candidates or not registry.available(candidates[0]):
+                continue
+            adapter2 = registry.get(candidates[0])
+            result2, req2 = execute_with_retries(
+                session, registry, adapter2,
+                tenant_id=job.tenant_id, job_id=job.id, entity_type=job.entity_type,
+                entity_id=job.entity_id, identifiers=identifiers, fields=[f],
+                trace_id=job.trace_id,
+            )
+            actual_cost += result2.cost_credits
+            fv2 = result2.fields.get(f)
+            if fv2 is not None:
+                obs2 = _persist_observation(session, job, entity, f, fv2, candidates[0], req2.id)
+                observations_by_field[f].append(obs2)
+                cross_checked.append(f)
+                ledger.record_entry(
+                    session, tenant_id=job.tenant_id, operation="enrich_field",
+                    campaign_id=job.campaign_id, job_id=job.id, entity_type=job.entity_type,
+                    entity_id=job.entity_id, provider_key=candidates[0],
+                    provider_request_id=req2.id, fields_requested=[f],
+                    estimated_cost=adapter2.field_cost(job.entity_type, f),
+                    actual_cost=adapter2.field_cost(job.entity_type, f),
+                    outcome=result2.outcome.value, cache_status=CacheStatus.MISS.value,
+                    trace_id=job.trace_id,
+                )
+                route_row = route_rows.get(f)
+                if route_row is not None:
+                    route_row.fallback_detail = {
+                        **(route_row.fallback_detail or {}),
+                        "stale_cross_check": candidates[0],
+                        "primary_age_days": round(age, 1),
+                    }
+
         # Fields nobody could fill → negative cache (avoid re-buying known-empty lookups).
         for f in remaining:  # noqa: B007 — key iteration
             if f not in observations_by_field:
@@ -347,6 +407,7 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
             "fields_returned": sorted(observations_by_field),
             "actual_cost_credits": round(actual_cost, 4),
             "fallback_rounds": round_no - 1,
+            "stale_cross_checked": cross_checked,
         }
         summary["providers_used"] = sorted({
             o.provider_key for obs in observations_by_field.values() for o in obs
@@ -455,8 +516,9 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
         ))
         entity.record_confidence = entity_result.score
         min_conf = campaign.min_confidence if campaign else settings.default_min_confidence
-        auto_accept = entity_result.score >= min_conf and not review_fields
-        if not auto_accept and not review_fields and accepted_fields:
+        auto_accept = bool(accepted_fields) and entity_result.score >= min_conf and not review_fields
+        low_confidence_review = not auto_accept and not review_fields and bool(accepted_fields)
+        if low_confidence_review:
             create_task(
                 session, job.tenant_id, entity_type=job.entity_type, entity_id=job.entity_id,
                 field_name=None,
@@ -465,7 +527,9 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
             )
         summary["entity_confidence"] = entity_result.score
         summary["accepted"] = auto_accept
-        summary["review_required"] = bool(review_fields) or not auto_accept
+        # A job is only "awaiting review" when a review task actually exists for it —
+        # zero-yield jobs terminate as completed-but-not-accepted instead of orphaning.
+        summary["review_required"] = bool(review_fields) or low_confidence_review
         step.detail = {"entity_confidence": entity_result.score, "auto_accept": auto_accept}
 
     # ── 8. CRM gate & sync ────────────────────────────────────────────────

@@ -1,0 +1,47 @@
+# fly.api.toml — EXAMPLE Fly.io config for the RelayIQ API (template; not deployed).
+# App name is passed on the command line (`fly deploy --app <name> --config ...`),
+# so no environment-specific name is hardcoded here.
+
+# Build from the backend Dockerfile (apps/api is the deploy/build context passed
+# to `fly deploy`); overridden when --image is supplied.
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Migrations run once per release in a temporary machine, before new
+  # instances receive traffic.
+  release_command = "alembic upgrade head"
+
+[env]
+  # Non-secret configuration only. Secrets (DATABASE_URL, REDIS_URL,
+  # RELAYIQ_JWT_SECRET, ...) are set with `fly secrets set` — see README.md.
+  RELAYIQ_ENV = "production"
+  RELAYIQ_LOG_LEVEL = "INFO"
+  RELAYIQ_METRICS_ENABLED = "true"
+  RELAYIQ_SYNTHETIC_WORLD_PATH = "/app/data/synthetic_world.json"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Scale-to-zero keeps the hobby bill near $0; raise min_machines_running to 1
+  # to avoid cold starts once real traffic exists.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/readyz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[metrics]
+  # Fly's platform Prometheus scrapes this and exposes it per-org; the same
+  # endpoint the local compose Prometheus uses.
+  port = 8000
+  path = "/metrics"

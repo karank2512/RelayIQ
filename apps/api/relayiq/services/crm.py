@@ -6,6 +6,7 @@ The HubSpot adapter is fully implemented and unit-tested against recorded-shape 
 Set HUBSPOT_ACCESS_TOKEN and create a CrmConnection(system='hubspot', mode='live') to use it.
 """
 
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -115,7 +116,9 @@ class SimulatorCrmAdapter(CrmAdapter):
         row = self._find(session, tenant_id, object_type, external_id, properties_lookup(properties))
         now_iso = datetime.now(UTC).isoformat()
         if row is None:
-            ext = external_id or f"sim-{object_type}-{abs(hash(frozenset(properties.items()))) % 10**10}"
+            # Random id, never derived from property values — identical property sets on
+            # different records must not collide on the (tenant, type, external_id) key.
+            ext = external_id or f"sim-{object_type}-{uuid.uuid4().hex[:12]}"
             row = CrmSimRecord(
                 tenant_id=tenant_id, object_type=object_type, external_id=ext,
                 properties={}, property_updated_at={},

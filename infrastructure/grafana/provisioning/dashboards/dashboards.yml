@@ -1,0 +1,15 @@
+# Grafana dashboard provisioning (mounted at /etc/grafana/provisioning/dashboards).
+# Dashboard JSON files are mounted at /var/lib/grafana/dashboards (see docker-compose.yml).
+apiVersion: 1
+
+providers:
+  - name: relayiq
+    orgId: 1
+    folder: RelayIQ
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

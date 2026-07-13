@@ -1,0 +1,65 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly re-scan so new advisories against pinned deps still surface.
+    - cron: "17 6 * * 1"
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    # Advisory-only: new CVEs in transitive dependencies should be triaged, not
+    # instantly break every PR. Findings are visible in the job log / summary.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+      - name: Install production dependencies
+        run: pip install .
+      - name: pip-audit
+        run: |
+          pip install pip-audit
+          # Audit the resolved environment (covers transitive deps of relayiq).
+          pip-audit --skip-editable
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so gitleaks can scan all commits, not just the tip.
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          # GITHUB_TOKEN only (for PR annotations). No GITLEAKS_LICENSE: not required
+          # for individual/OSS use, and no other secret is referenced.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  trivy-image-scan:
+    runs-on: ubuntu-latest
+    # Advisory-only: base-image CVEs without upstream fixes would otherwise
+    # permanently red the pipeline. Results still appear in the job log.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image for scanning (no push)
+        run: docker build -t relayiq-api:scan apps/api
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: relayiq-api:scan
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"

@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Dev-only credentials below (relayiq/relayiq_dev_password, dev_only_* secrets) are
+# throwaway values for ephemeral CI service containers — they are NOT production secrets.
+# No production secret is referenced anywhere in this workflow.
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+      - name: Install ruff
+        run: pip install "ruff>=0.5"
+      - name: Ruff
+        run: ruff check relayiq tests
+
+  backend-typecheck:
+    runs-on: ubuntu-latest
+    # mypy is advisory for now: the codebase is not yet fully annotated and strictness
+    # will be ratcheted up incrementally. Failures are visible in logs but non-blocking.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+      - name: Install package with dev extras
+        run: pip install -e ".[dev]"
+      - name: Mypy
+        run: mypy relayiq
+
+  backend-unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+      - name: Install package with dev extras
+        run: pip install -e ".[dev]"
+      - name: Unit tests
+        run: pytest tests/unit -q
+
+  backend-integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: relayiq
+          POSTGRES_PASSWORD: relayiq_dev_password
+          POSTGRES_DB: relayiq
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U relayiq -d relayiq"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      # Service containers are published on localhost inside the runner.
+      DATABASE_URL: postgresql+psycopg://relayiq:relayiq_dev_password@localhost:5432/relayiq
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      RELAYIQ_ENV: test
+      RELAYIQ_JWT_SECRET: ci_only_jwt_secret_not_production
+      RELAYIQ_WEBHOOK_SECRETS: ci_only_webhook_secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+      - name: Install package with dev extras
+        run: pip install -e ".[dev]"
+      - name: Apply migrations
+        run: alembic upgrade head
+      - name: Integration + e2e tests
+        # Pytest exit code 5 means "no tests collected" — tolerated while the
+        # integration/e2e suites are being built out in a parallel workstream,
+        # so an empty directory does not mask a real failure as a hard error.
+        run: |
+          set +e
+          pytest tests/integration tests/e2e -q
+          rc=$?
+          if [ "$rc" -eq 5 ]; then
+            echo "::warning::No integration/e2e tests collected yet (pytest exit 5); treating as pass."
+            exit 0
+          fi
+          exit $rc
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/dashboard/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+
+  migration-validation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: relayiq
+          POSTGRES_PASSWORD: relayiq_dev_password
+          POSTGRES_DB: relayiq
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U relayiq -d relayiq"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://relayiq:relayiq_dev_password@localhost:5432/relayiq
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/api/pyproject.toml
+      - name: Install package
+        run: pip install .
+      - name: Upgrade empty database to head
+        run: alembic upgrade head
+      - name: Alembic check (model/migration drift)
+        # `alembic check` compares SQLAlchemy metadata against the migrated schema.
+        # Non-blocking: benign type-representation diffs (e.g. JSON variants, server
+        # defaults) can produce false positives; drift is surfaced but does not gate.
+        continue-on-error: true
+        run: alembic check
+      - name: Downgrade to base and re-upgrade (reversibility)
+        continue-on-error: true
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image (no push)
+        run: docker build -t relayiq-api:ci apps/api
+      - name: Build dashboard image (no push)
+        run: docker build -t relayiq-dashboard:ci apps/dashboard

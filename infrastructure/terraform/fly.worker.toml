@@ -1,0 +1,23 @@
+# fly.worker.toml — EXAMPLE Fly.io config for the RelayIQ Celery worker
+# (template; not deployed). Same image as the API; only the command differs.
+# App name is passed on the command line (`fly deploy --app <name> --config ...`).
+
+[build]
+  dockerfile = "Dockerfile"
+
+[processes]
+  # Mirrors the docker-compose worker service command.
+  worker = "celery -A relayiq.workers.celery_app worker -l info -Q enrichment,sync --concurrency=2"
+
+[env]
+  # Non-secret configuration only; secrets via `fly secrets set` (README.md).
+  RELAYIQ_ENV = "production"
+  RELAYIQ_LOG_LEVEL = "INFO"
+  RELAYIQ_SYNTHETIC_WORLD_PATH = "/app/data/synthetic_world.json"
+
+# No [http_service]: the worker exposes nothing publicly. It must NOT scale to
+# zero, or queued enrichment/sync jobs would sit unprocessed.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["worker"]

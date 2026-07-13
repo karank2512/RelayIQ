@@ -1,0 +1,17 @@
+# Prometheus config for the local docker-compose stack.
+# Mounted read-only at /etc/prometheus/prometheus.yml (see docker-compose.yml).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: relayiq-api
+    metrics_path: /metrics
+    static_configs:
+      # "api" is the compose service name on the default compose network.
+      - targets: ["api:8000"]
