@@ -87,10 +87,21 @@ def sync_entity(
     if not canon_rows:
         return None
 
-    # Idempotency key over the exact value-set being synced.
+    # Idempotency fingerprint covers the value AND the gate-relevant state (staleness,
+    # confidence, provenance): a review approval or refresh legitimately changes the gate
+    # outcome and must produce a new attempt, while true duplicates still dedupe.
     value_fingerprint = hashlib.sha256(
         json.dumps(
-            {r.field_name: r.normalized_value or r.value for r in canon_rows}, sort_keys=True
+            {
+                r.field_name: [
+                    r.normalized_value or r.value,
+                    r.staleness_state,
+                    round(r.confidence, 3) if r.confidence is not None else None,
+                    r.source_kind,
+                ]
+                for r in canon_rows
+            },
+            sort_keys=True,
         ).encode()
     ).hexdigest()[:24]
     idem_key = f"{entity_type}:{entity.id}:{value_fingerprint}"
@@ -200,6 +211,12 @@ def sync_entity(
         CRM_SYNCS.labels(system=connection.system, status="skipped").inc()
         session.flush()
         return attempt
+
+    # Always carry the natural identity key so the CRM record stays matchable
+    # (create-or-update by email/domain — identity is not a gated enrichment value).
+    lookup = _entity_lookup(entity_type, entity)
+    for key_prop, key_val in lookup.items():
+        mapped_now.setdefault(key_prop, key_val)
     if dry_run:
         attempt.status = SyncStatus.SKIPPED.value
         attempt.gate_summary = {**attempt.gate_summary, "dry_run": True, "would_write": mapped_now}

@@ -309,30 +309,35 @@ class Helpers:
             if not values_equivalent("job_title", str(a["value"]), str(b["value"])):
                 candidates.append(c)
 
-        for contact in candidates[:max_candidates]:
-            payload = cls.contact_payload(contact)
-            cls.set_routing_policy(client, env, ["beta"])
-            r1 = cls.enrich(client, env, payload, ["job_title"])
-            assert r1.status_code == 201, r1.text
-            j1 = r1.json()
-            if "beta" not in (j1["result_summary"].get("providers_used") or []):
-                continue  # simulator failure or coverage gap — try the next candidate
-            entity_id = j1["entity_id"]
-            cls.set_routing_policy(client, env, ["alpha"])
-            cls.expire_canonical(env.tenant_id, "contact", entity_id, "job_title")
-            cls.invalidate_cache(env.tenant_id, "contact", payload["work_email"])
-            r2 = cls.enrich(client, env, payload, ["job_title"])
-            assert r2.status_code == 201, r2.text
-            j2 = r2.json()
-            q = client.get(
-                "/v1/review/queue", params={"status": "pending", "limit": 200},
-                headers=env.headers("reviewer"),
-            )
-            assert q.status_code == 200, q.text
-            for task in q.json()["items"]:
-                if task["entity_id"] == entity_id and task["field_name"] == "job_title":
-                    return task, j2, contact
-        pytest.fail(f"no review task produced within {max_candidates} conflict candidates")
+        try:
+            for contact in candidates[:max_candidates]:
+                payload = cls.contact_payload(contact)
+                cls.set_routing_policy(client, env, ["beta"])
+                r1 = cls.enrich(client, env, payload, ["job_title"])
+                assert r1.status_code == 201, r1.text
+                j1 = r1.json()
+                if "beta" not in (j1["result_summary"].get("providers_used") or []):
+                    continue  # simulator failure or coverage gap — try the next candidate
+                entity_id = j1["entity_id"]
+                cls.set_routing_policy(client, env, ["alpha"])
+                cls.expire_canonical(env.tenant_id, "contact", entity_id, "job_title")
+                cls.invalidate_cache(env.tenant_id, "contact", payload["work_email"])
+                r2 = cls.enrich(client, env, payload, ["job_title"])
+                assert r2.status_code == 201, r2.text
+                j2 = r2.json()
+                q = client.get(
+                    "/v1/review/queue", params={"status": "pending", "limit": 200},
+                    headers=env.headers("reviewer"),
+                )
+                assert q.status_code == 200, q.text
+                for task in q.json()["items"]:
+                    if task["entity_id"] == entity_id and task["field_name"] == "job_title":
+                        return task, j2, contact
+            pytest.fail(f"no review task produced within {max_candidates} conflict candidates")
+        finally:
+            # Restore default routing so the policy flip never leaks into other tests
+            # (the tenant policy overrides DEFAULT_POLICY once created).
+            cls.set_routing_policy(client, env, ["beta", "alpha"])
 
     @staticmethod
     def webhook_headers(body: bytes, delivery_id: str | None, *,

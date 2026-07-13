@@ -113,6 +113,7 @@ async def enrichment_webhook(
         idempotency_key=f"webhook:{delivery_id}",
     )
     db.add(job)
+    db.flush()  # populate job.id before linking the delivery to it
     delivery.job_id = job.id
     delivery.status = "processed"
     db.commit()

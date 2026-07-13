@@ -98,7 +98,7 @@ class ReviewTaskStatus(StrEnum):
 class ReviewAction(StrEnum):
     CLAIM = "claim"
     ACCEPT_SUGGESTED = "accept_suggested"
-    SELECT_ALTERNATIVE = "select_alternative"
+    SELECT_OBSERVATION = "select_observation"
     CORRECT_VALUE = "correct_value"
     REJECT = "reject"
     DEFER = "defer"
