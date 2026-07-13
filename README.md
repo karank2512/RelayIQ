@@ -25,7 +25,8 @@ makes each of those a **measured, controlled decision** instead of an accident.
 
 ### Measured impact (seeded synthetic benchmark — see honesty notes below)
 
-Same 573 submissions (15% duplicate deliveries), same simulated providers, same ground truth:
+Same 495 submissions (431 unique contacts + 15% duplicate deliveries), same simulated
+providers, same ground truth:
 
 | Strategy | Cost (credits) | Field precision | True usable leads | Cost / usable lead |
 |---|---|---|---|---|
@@ -137,10 +138,16 @@ make worker       # celery worker
 
 ## Tests, benchmarks, load
 
+**302 backend tests pass** (259 unit; integration incl. role-matrix, cross-tenant isolation,
+and concurrency races; all 12 required e2e scenarios), plus 6 Playwright UI flows.
+Measured load (dev laptop, `docs/benchmarks/load-test-results.md`): 2,061 requests,
+**0 failures**, 35 req/s sustained, p50 32 ms / p95 580 ms; idempotent replays p50 12 ms.
+
 ```bash
 make test              # unit tests
-make test-integration  # against real Postgres + Redis
+make test-integration  # against real Postgres + Redis (make dev-deps first)
 make test-e2e          # the 12 end-to-end scenarios (duplicate webhooks, budget blocks, reversals…)
+cd apps/dashboard && npm run e2e   # Playwright UI flows (stack must be running)
 make benchmark         # regenerates docs/benchmarks/results.{json,md}
 make calibration       # regenerates docs/benchmarks/calibration.{json,md}
 make load-test         # locust, 25 users / 60s — local-machine numbers only

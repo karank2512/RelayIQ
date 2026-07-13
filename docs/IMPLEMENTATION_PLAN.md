@@ -2,6 +2,11 @@
 
 > Working checklist for the build. Updated as milestones complete.
 > Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[s]` simulated · `[d]` designed-only
+>
+> **Final state (2026-07-13): build complete.** 302 backend tests + 6 Playwright flows pass;
+> benchmark, calibration, and load results measured and committed under docs/benchmarks/.
+> Salesforce adapter and the learned confidence model remain designed-only by scope decision
+> (see docs/roadmap.md).
 
 ## Phase 0 — Assessment (2026-07-11)
 
