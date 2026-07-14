@@ -6,8 +6,47 @@ import time
 import fakeredis
 import pytest
 
+from relayiq.api.routers.webhooks import _resolve_webhook_secrets
 from relayiq.config import ProductionConfigError, Settings, validate_production_settings
 from relayiq.services.ratelimit import RateLimiter
+
+
+class _FakeTenant:
+    def __init__(self, settings):
+        self.settings = settings
+
+
+class TestWebhookSecretResolution:
+    """Fail-closed per-tenant secret selection — a tenant that opts in NEVER falls back
+    to the global secret, even when its own list is empty or malformed."""
+
+    GLOBAL = ["GLOBAL_SECRET"]
+
+    def test_no_tenant_uses_global(self):
+        assert _resolve_webhook_secrets(None, self.GLOBAL) == self.GLOBAL
+
+    def test_tenant_without_key_uses_global(self):
+        assert _resolve_webhook_secrets(_FakeTenant({}), self.GLOBAL) == self.GLOBAL
+
+    def test_tenant_with_real_secrets_ignores_global(self):
+        t = _FakeTenant({"webhook_secrets": ["s1", "s2"]})
+        assert _resolve_webhook_secrets(t, self.GLOBAL) == ["s1", "s2"]
+
+    def test_opted_in_empty_list_rejects_all_no_global_fallback(self):
+        # The critical fail-closed case: explicit [] must NOT downgrade to global.
+        t = _FakeTenant({"webhook_secrets": []})
+        assert _resolve_webhook_secrets(t, self.GLOBAL) == []
+
+    def test_string_misconfig_is_not_char_split(self):
+        t = _FakeTenant({"webhook_secrets": "abc"})
+        assert _resolve_webhook_secrets(t, self.GLOBAL) == []  # not ['a','b','c']
+
+    def test_non_string_members_dropped(self):
+        t = _FakeTenant({"webhook_secrets": ["good", "", None, 123, "also-good"]})
+        assert _resolve_webhook_secrets(t, self.GLOBAL) == ["good", "also-good"]
+
+    def test_null_settings_uses_global(self):
+        assert _resolve_webhook_secrets(_FakeTenant(None), self.GLOBAL) == self.GLOBAL
 
 GOOD = dict(
     RELAYIQ_ENV="production",

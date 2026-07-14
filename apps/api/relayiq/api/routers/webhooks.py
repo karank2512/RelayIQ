@@ -39,6 +39,21 @@ def _peek_tenant_slug(raw_body: bytes) -> str | None:
         return None
 
 
+def _resolve_webhook_secrets(tenant: Tenant | None, global_secrets: list[str]) -> list[str]:
+    """Which secrets verify this delivery.
+
+    Security semantics (fail closed): once a tenant OPTS IN to per-tenant secrets by
+    setting the `webhook_secrets` key, ONLY its own valid secrets are accepted — the
+    global secret can never authorize that tenant, even if the tenant's list is empty
+    or malformed (that yields an empty set → all signatures rejected). A tenant that
+    never sets the key uses the deployment-global secrets (backward compatible)."""
+    if tenant is not None and isinstance(tenant.settings, dict) and "webhook_secrets" in tenant.settings:
+        raw = tenant.settings.get("webhook_secrets")
+        configured = raw if isinstance(raw, list) else []
+        return [s for s in configured if isinstance(s, str) and s]
+    return global_secrets
+
+
 @router.post("/enrichment")
 async def enrichment_webhook(
     request: Request,
@@ -58,8 +73,7 @@ async def enrichment_webhook(
         db.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none()
         if slug else None
     )
-    tenant_secrets = list((tenant.settings or {}).get("webhook_secrets", [])) if tenant else []
-    secrets = tenant_secrets or settings.webhook_secret_list
+    secrets = _resolve_webhook_secrets(tenant, settings.webhook_secret_list)
 
     verdict = verify_webhook(
         signature, raw_body, secrets,
