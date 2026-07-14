@@ -31,6 +31,68 @@ log = get_logger("api")
 # Client-supplied correlation ids are echoed back — accept a conservative charset only.
 _CORRELATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
 
+def _too_large() -> "JSONResponse":
+    return JSONResponse(
+        status_code=413,
+        content={"error": {"code": "payload_too_large", "message": "request body too large"}},
+    )
+
+
+class BodySizeLimitMiddleware:
+    """Pure-ASGI body-size cap (outermost middleware). Buffers the request body up to
+    `max_bytes`+1 and rejects with 413 the moment it exceeds — so chunked transfers and a
+    missing/forged Content-Length cannot bypass it (M2). Memory is bounded to the cap; the
+    buffered body is replayed to the app unchanged. RelayIQ has no streaming uploads, so
+    eager buffering costs nothing here."""
+
+    def __init__(self, app, max_bytes: int):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Fast reject on an oversized declared Content-Length.
+        headers = dict(scope.get("headers") or [])
+        declared = headers.get(b"content-length")
+        if declared is not None:
+            try:
+                if int(declared) > self.max_bytes:
+                    await _too_large()(scope, receive, send)
+                    return
+            except ValueError:
+                pass  # malformed length: let the ASGI server handle it
+
+        body = b""
+        trailing: list = []
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                trailing.append(message)  # e.g. http.disconnect
+                break
+            body += message.get("body", b"")
+            if len(body) > self.max_bytes:
+                await _too_large()(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            if trailing:
+                return trailing.pop(0)
+            return await receive()
+
+        await self.app(scope, replay, send)
+
+
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -40,6 +102,18 @@ SECURITY_HEADERS = {
     # (docs/production-checklist.md) assumes TLS termination at the edge (Fly/ALB/nginx).
     "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
 }
+
+
+def _client_ip(request: Request, trust_forwarded: bool) -> str:
+    """Client IP for rate limiting. Trusts X-Forwarded-For's left-most hop ONLY when
+    RELAYIQ_TRUST_FORWARDED_FOR is set (behind a trusted proxy); otherwise uses the socket
+    peer so the key can't be spoofed by a header (M6). Behind a proxy without this flag,
+    all clients share the proxy IP — set the flag when you deploy behind a TLS edge."""
+    if trust_forwarded:
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 def _rate_limit_scope(path: str) -> tuple[str, int] | None:
@@ -77,29 +151,16 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Correlation-Id"],
     )
+    # Outermost: cap the raw body before anything reads it (added last = runs first).
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
 
     @app.middleware("http")
-    async def hardening_middleware(request: Request, call_next):
-        # Request body cap — reject oversized payloads before they reach handlers.
-        declared = request.headers.get("content-length")
-        if declared is not None:
-            try:
-                if int(declared) > settings.max_body_bytes:
-                    return JSONResponse(
-                        status_code=413,
-                        content={"error": {"code": "payload_too_large",
-                                           "message": "request body too large"}},
-                    )
-            except ValueError:
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": {"code": "bad_request", "message": "invalid content-length"}},
-                )
-
+    async def rate_limit_middleware(request: Request, call_next):
         # Rate limiting: strict per-scope limits on login/webhooks, broad default elsewhere.
+        # (Body-size cap is enforced by BodySizeLimitMiddleware, added outermost below.)
         from relayiq.services.ratelimit import get_rate_limiter
 
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = _client_ip(request, settings.trust_forwarded_for)
         scoped = _rate_limit_scope(request.url.path)
         limiter = get_rate_limiter()
         if scoped is not None:

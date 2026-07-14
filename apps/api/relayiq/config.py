@@ -27,6 +27,23 @@ class ProductionConfigError(RuntimeError):
     """Raised at startup when production is configured with unsafe values."""
 
 
+# Minimum distinct characters — rejects "aaaa…", "        ", "121212…" style low-entropy keys.
+_MIN_DISTINCT_CHARS = 8
+
+
+def _secret_problems(name: str, value: str) -> list[str]:
+    """Reject dev placeholders, short, whitespace-only, and low-entropy secrets.
+    The value is stripped first so space-padding cannot mask a short/empty secret."""
+    stripped = value.strip()
+    if stripped in _DEV_SECRET_SENTINELS or value in _DEV_SECRET_SENTINELS:
+        return [f"{name} is a known development placeholder"]
+    if len(stripped) < _MIN_SECRET_LENGTH:
+        return [f"{name} must be at least {_MIN_SECRET_LENGTH} non-whitespace characters"]
+    if len(set(stripped)) < _MIN_DISTINCT_CHARS:
+        return [f"{name} is too low-entropy (needs ≥{_MIN_DISTINCT_CHARS} distinct characters)"]
+    return []
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -70,6 +87,10 @@ class Settings(BaseSettings):
     # flip off to reduce surface in locked-down deployments.
     expose_docs: bool = Field(default=True, alias="RELAYIQ_EXPOSE_DOCS")
     max_body_bytes: int = Field(default=2 * 1024 * 1024, alias="RELAYIQ_MAX_BODY_BYTES")
+
+    # When true, trust X-Forwarded-For for the client IP (rate limiting). ONLY enable when
+    # the app sits behind a trusted proxy that sets it — otherwise clients spoof their IP.
+    trust_forwarded_for: bool = Field(default=False, alias="RELAYIQ_TRUST_FORWARDED_FOR")
 
     # Rate limiting (Redis-backed fixed windows; 0 disables a limiter)
     rate_limit_login_per_minute: int = Field(default=5, alias="RELAYIQ_RATE_LIMIT_LOGIN_PER_MINUTE")
@@ -117,32 +138,29 @@ def validate_production_settings(settings: Settings) -> None:
     """Refuse to boot production with unsafe configuration (fail fast, fail loud)."""
     problems: list[str] = []
 
-    if settings.jwt_secret in _DEV_SECRET_SENTINELS:
-        problems.append("RELAYIQ_JWT_SECRET is a known development placeholder")
-    elif len(settings.jwt_secret) < _MIN_SECRET_LENGTH:
-        problems.append(f"RELAYIQ_JWT_SECRET must be at least {_MIN_SECRET_LENGTH} characters")
+    problems.extend(_secret_problems("RELAYIQ_JWT_SECRET", settings.jwt_secret))
 
-    for secret in settings.webhook_secret_list:
-        if secret in _DEV_SECRET_SENTINELS:
-            problems.append("RELAYIQ_WEBHOOK_SECRETS contains a known development placeholder")
-            break
-        if len(secret) < _MIN_SECRET_LENGTH:
-            problems.append(
-                f"every webhook secret must be at least {_MIN_SECRET_LENGTH} characters"
-            )
-            break
     if not settings.webhook_secret_list:
         problems.append("RELAYIQ_WEBHOOK_SECRETS must be set")
+    for secret in settings.webhook_secret_list:
+        webhook_problems = _secret_problems("a webhook secret", secret)
+        if webhook_problems:
+            problems.extend(webhook_problems)
+            break
 
     if "relayiq_dev_password" in settings.database_url:
         problems.append("DATABASE_URL still uses the development password")
 
-    if "*" in settings.cors_origin_list:
+    origins = [o.lower() for o in settings.cors_origin_list]
+    if "*" in origins:
         problems.append("RELAYIQ_CORS_ORIGINS must not be a wildcard in production")
-    if any(o.startswith("http://localhost") or o.startswith("http://127.")
-           for o in settings.cors_origin_list):
+    _loopback_hosts = ("localhost", "127.", "[::1]", "0.0.0.0")  # noqa: S104 — reject list, not a bind
+    if any(
+        any(f"//{h}" in o for h in _loopback_hosts)
+        for o in origins
+    ):
         problems.append(
-            "RELAYIQ_CORS_ORIGINS still points at localhost — set the dashboard's public URL"
+            "RELAYIQ_CORS_ORIGINS still points at a loopback host — set the dashboard's public URL"
         )
 
     if settings.metrics_enabled and not settings.metrics_token:

@@ -100,7 +100,7 @@ class TestHttpHardening:
         assert r.headers["X-Frame-Options"] == "DENY"
         assert "Strict-Transport-Security" in r.headers
 
-    def test_oversized_body_rejected(self, client, env):
+    def test_oversized_body_declared_length_rejected(self, client, env):
         r = client.post(
             "/v1/enrichment/execute",
             content=b"{}",
@@ -108,6 +108,16 @@ class TestHttpHardening:
                      "Content-Type": "application/json",
                      "Content-Length": str(50 * 1024 * 1024)},
         )
+        assert r.status_code == 413
+
+    def test_oversized_body_chunked_no_content_length_rejected(self, client, env):
+        # M2: streamed body with no Content-Length must still be capped.
+        def gen():
+            for _ in range(30):  # 3 MB > 2 MB cap
+                yield b"x" * 100_000
+
+        r = client.post("/v1/webhooks/enrichment", content=gen(),
+                        headers={"X-Delivery-Id": "big"})
         assert r.status_code == 413
 
     def test_correlation_id_garbage_regenerated(self, client):

@@ -53,6 +53,18 @@ class CircuitBreaker:
         return f"riq:cb:{self.provider_key}:opened_at"
 
     @property
+    def _probe_key(self) -> str:
+        return f"riq:cb:{self.provider_key}:probe"
+
+    def _local_state(self) -> str:
+        with self._lock:
+            if self._opened_at is None:
+                return "closed"
+            if time.monotonic() - self._opened_at >= self.cooldown_seconds:
+                return "half_open"
+            return "open"
+
+    @property
     def state(self) -> str:
         if self.use_redis:
             try:
@@ -62,30 +74,52 @@ class CircuitBreaker:
                 if time.time() - float(opened_at) >= self.cooldown_seconds:
                     return "half_open"
                 return "open"
-            except Exception:  # noqa: BLE001, S110 — Redis failure degrades to in-process state
+            except Exception:  # noqa: BLE001, S110 — degrade to last-known in-process state
                 pass
-        with self._lock:
-            if self._opened_at is None:
-                return "closed"
-            if time.monotonic() - self._opened_at >= self.cooldown_seconds:
-                return "half_open"
-            return "open"
+        return self._local_state()
 
     def allow(self) -> bool:
-        return self.state != "open"
-
-    def record_success(self) -> None:
+        """Closed/half-open allow. In half-open, only ONE probe per cooldown window is
+        admitted (a Redis SET NX token) so a still-down provider is not re-flooded (M5).
+        On Redis failure the local mirror keeps the last-known open/closed decision (M4)."""
+        state = self.state
+        if state == "open":
+            return False
+        if state == "closed":
+            return True
+        # half_open: admit a single probe per window.
         if self.use_redis:
             try:
-                self._redis().delete(self._fail_key, self._open_key)
-                return
-            except Exception:  # noqa: BLE001, S110 — Redis failure degrades to in-process state
+                window = int(time.time() // max(1, self.cooldown_seconds))
+                token = self._redis().set(
+                    f"{self._probe_key}:{window}", "1", nx=True, ex=int(self.cooldown_seconds) + 1
+                )
+                return bool(token)
+            except Exception:  # noqa: BLE001, S110 — degrade to local single-probe gate
                 pass
+        # Local half-open probe gate: allow once, then re-arm the open window.
+        with self._lock:
+            if self._opened_at is not None:
+                self._opened_at = time.monotonic()  # consume the probe; next call is "open"
+            return True
+
+    def record_success(self) -> None:
+        # Always clear the local mirror so the Redis-flap fallback is not stale (M4).
         with self._lock:
             self._failures = 0
             self._opened_at = None
+        if self.use_redis:
+            try:
+                self._redis().delete(self._fail_key, self._open_key)
+            except Exception:  # noqa: BLE001, S110 — local mirror already cleared
+                pass
 
     def record_failure(self) -> None:
+        with self._lock:
+            self._failures += 1
+            local_tripped = self._failures >= self.threshold
+            if local_tripped:
+                self._opened_at = time.monotonic()  # mirror keeps last-known open state (M4)
         if self.use_redis:
             try:
                 r = self._redis()
@@ -95,13 +129,8 @@ class CircuitBreaker:
                 failures, _ = pipe.execute()
                 if int(failures) >= self.threshold:
                     r.set(self._open_key, str(time.time()), ex=int(self.cooldown_seconds * 4))
-                return
-            except Exception:  # noqa: BLE001, S110 — Redis failure degrades to in-process state
+            except Exception:  # noqa: BLE001, S110 — local mirror already updated
                 pass
-        with self._lock:
-            self._failures += 1
-            if self._failures >= self.threshold:
-                self._opened_at = time.monotonic()
 
 
 def _make_breaker(provider_key: str) -> CircuitBreaker:

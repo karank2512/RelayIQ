@@ -41,22 +41,37 @@ DEMO_USERS = [
 DEFAULT_DEV_PASSWORD = "relayiq-demo-password"  # noqa: S105 — documented dev-only default
 
 
+def _looks_like_production_db(database_url: str) -> bool:
+    """A DB is 'clearly local' only when its host is localhost/127.* or the compose service
+    name 'postgres'. Anything else is treated as potentially production — so the guard fires
+    even when RELAYIQ_ENV is left unset while pointed at a remote database (L9)."""
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(database_url.replace("+psycopg", "")).hostname or "").lower()
+    except ValueError:
+        return True
+    return host not in ("localhost", "127.0.0.1", "::1", "postgres", "")
+
+
 def _production_seed_guard(settings) -> None:
     """Demo data carries documented default passwords — never let it near production
-    unless explicitly forced AND every seed password is supplied via the environment."""
-    if not settings.is_production:
+    unless explicitly forced AND every seed password is supplied via the environment.
+    Fires on RELAYIQ_ENV=production OR a non-local DATABASE_URL (defense in depth)."""
+    guarded = settings.is_production or _looks_like_production_db(settings.database_url)
+    if not guarded:
         return
     if os.environ.get("RELAYIQ_SEED_ALLOW_PRODUCTION") != "1":
         print(  # noqa: T201
-            "seed: refusing to seed demo data in production. This creates demo users and "
-            "synthetic records. If you really want this (staging smoke test), set "
-            "RELAYIQ_SEED_ALLOW_PRODUCTION=1 and provide RELAYIQ_SEED_*_PASSWORD for "
-            "every role."
+            "seed: refusing to seed demo data — RELAYIQ_ENV=production or DATABASE_URL points "
+            "at a non-local host. This creates demo users with documented default passwords. "
+            "If you really want this (staging smoke test), set RELAYIQ_SEED_ALLOW_PRODUCTION=1 "
+            "and provide RELAYIQ_SEED_*_PASSWORD for every role."
         )
         sys.exit(2)
     missing = [env for _, _, env in DEMO_USERS if not os.environ.get(env)]
     if missing:
-        print(f"seed: production seeding requires explicit passwords; missing: {missing}")  # noqa: T201
+        print(f"seed: forced production seeding requires explicit passwords; missing: {missing}")  # noqa: T201, E501
         sys.exit(2)
 
 

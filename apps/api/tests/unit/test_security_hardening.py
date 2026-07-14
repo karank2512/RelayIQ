@@ -50,11 +50,11 @@ class TestWebhookSecretResolution:
 
 GOOD = dict(
     RELAYIQ_ENV="production",
-    RELAYIQ_JWT_SECRET="x" * 48,
-    RELAYIQ_WEBHOOK_SECRETS="w" * 48,
+    RELAYIQ_JWT_SECRET="Jq7km2vP4wL8nR3tY6uZ1aB5cD0eF2gH9xW",
+    RELAYIQ_WEBHOOK_SECRETS="h4j8Km1nP5qR9sT2vW6xZ0aC3dE7fG1hK",
     DATABASE_URL="postgresql+psycopg://relayiq:strong-unique-password@db.internal:5432/relayiq",
     RELAYIQ_CORS_ORIGINS="https://app.example.com",
-    RELAYIQ_METRICS_TOKEN="m" * 48,
+    RELAYIQ_METRICS_TOKEN="m3N7pQ1rS5tV9wX2yZ4aB8cD6eF0gH2j",
 )
 
 
@@ -77,8 +77,8 @@ class TestProductionConfigValidation:
             validate_production_settings(make_settings(RELAYIQ_JWT_SECRET="short"))
 
     def test_dev_webhook_secret_rejected(self):
-        s = make_settings(RELAYIQ_WEBHOOK_SECRETS=f"{'w' * 48},dev_only_webhook_secret")
-        with pytest.raises(ProductionConfigError, match="WEBHOOK_SECRETS"):
+        s = make_settings(RELAYIQ_WEBHOOK_SECRETS="h4j8Km1nP5qR9sT2vW6xZ0aC3dE7fG1hK,dev_only_webhook_secret")
+        with pytest.raises(ProductionConfigError, match="webhook secret"):
             validate_production_settings(s)
 
     def test_dev_database_password_rejected(self):
@@ -90,7 +90,7 @@ class TestProductionConfigValidation:
 
     def test_localhost_cors_rejected(self):
         s = make_settings(RELAYIQ_CORS_ORIGINS="http://localhost:5173")
-        with pytest.raises(ProductionConfigError, match="localhost"):
+        with pytest.raises(ProductionConfigError, match="loopback"):
             validate_production_settings(s)
 
     def test_wildcard_cors_rejected(self):
@@ -165,3 +165,54 @@ class TestRateLimiter:
         rl = RateLimiter(client=Broken())  # type: ignore[arg-type]
         assert rl.allow("login", "ip", limit=1)
         assert rl.allow("login", "ip", limit=1)  # still open — availability over strictness
+
+
+class TestCircuitBreakerHardening:
+    """M4 (no disarm on Redis flap) and M5 (single half-open probe) via local-mode breaker."""
+
+    def _breaker(self, **kw):
+        from relayiq.providers.registry import CircuitBreaker
+
+        return CircuitBreaker(threshold=3, cooldown_seconds=0.2, provider_key="t",
+                              use_redis=False, **kw)
+
+    def test_opens_after_threshold(self):
+        b = self._breaker()
+        assert b.state == "closed"
+        for _ in range(3):
+            b.record_failure()
+        assert b.state == "open" and not b.allow()
+
+    def test_half_open_admits_single_probe(self):
+        b = self._breaker()
+        for _ in range(3):
+            b.record_failure()
+        time.sleep(0.25)
+        assert b.state == "half_open"
+        assert b.allow() is True   # one probe
+        assert b.allow() is False  # further traffic blocked until success/failure resolves
+
+    def test_success_resets_local_mirror(self):
+        b = self._breaker()
+        for _ in range(3):
+            b.record_failure()
+        b.record_success()
+        assert b.state == "closed" and b.allow()
+
+    def test_failure_updates_local_mirror_when_redis_path_used(self):
+        # M4: even on the Redis path, the in-process mirror must reflect open state so a
+        # later Redis failure (state property falling back to _local_state) stays open.
+        import fakeredis
+
+        from relayiq.providers.registry import CircuitBreaker
+        from relayiq.services import cache
+
+        cache.set_redis(fakeredis.FakeRedis(decode_responses=True))
+        try:
+            b = CircuitBreaker(threshold=3, cooldown_seconds=5, provider_key="m4",
+                               use_redis=True)
+            for _ in range(3):
+                b.record_failure()
+            assert b._local_state() == "open"  # mirror updated despite Redis path
+        finally:
+            cache.set_redis(fakeredis.FakeRedis(decode_responses=True))
