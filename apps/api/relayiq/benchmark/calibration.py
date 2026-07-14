@@ -24,6 +24,7 @@ from relayiq.benchmark.runner import (
     _call,
     _is_prefiltered,
     _mk_providers,
+    _obs_age,
     _obs_from_call,
     _thresholds,
     _truth_correct,
@@ -64,7 +65,7 @@ def collect_scored_predictions(seed: int = 42, n_companies: int = 250) -> list[t
         # staleness cross-check identical to the full strategy
         for f in {"job_title"} & set(obs_by_field):
             primary = obs_by_field[f][0]
-            age = (primary.retrieved_at - primary.source_timestamp).days
+            age = _obs_age(primary)
             if age > _thresholds(f).fresh_days:
                 other = [p for p in STATIC_ROUTES[f] if p != primary.provider_key]
                 if other:
@@ -80,7 +81,7 @@ def collect_scored_predictions(seed: int = 42, n_companies: int = 250) -> list[t
                                      ReconciliationOutcome.ACCEPT_WITH_WARNING) or not recon.chosen:
                 continue
             chosen = recon.chosen
-            age = (chosen.retrieved_at - chosen.source_timestamp).days
+            age = _obs_age(chosen)
             conf = score_field(FieldConfidenceInput(
                 provider_reliability_prior=PROVIDER_PRIORS.get(chosen.provider_key, 0.8),
                 field_quality_prior=0.85,

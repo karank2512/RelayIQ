@@ -105,8 +105,9 @@ def reserve(session: Session, budget: Budget | None, amount: float) -> BudgetSta
             Budget.spent_credits + Budget.reserved_credits + amt <= Budget.limit_credits
         )
     result = session.execute(stmt)
+    rowcount = int(getattr(result, "rowcount", 0))  # CursorResult at runtime; Result in stubs
     session.commit()
-    if result.rowcount == 0:
+    if rowcount == 0:
         BUDGET_BLOCKS.labels(kind="hard").inc()
         session.refresh(budget)
         return BudgetState(budget, allowed=False, warning=True, reason="hard budget exceeded",

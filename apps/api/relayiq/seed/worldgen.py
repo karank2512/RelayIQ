@@ -92,7 +92,7 @@ CONTACT_FIELDS = ["first_name", "last_name", "full_name", "work_email", "job_tit
                   "department", "country", "linkedin_url"]
 
 # Provider personalities: (accuracy, age_range, extra_missing) per field group
-PERSONALITIES = {
+PERSONALITIES: dict[str, dict[str, dict]] = {
     "alpha": {
         "company": {"accuracy": 0.92, "age": (5, 120), "missing_extra": 0.0},
         "contact": {"accuracy": 0.75, "age": (60, 400), "missing_extra": 0.10},
@@ -309,7 +309,7 @@ def generate_world(
             title, seniority, dept = rng.choice(TITLES)
             dom = comp["truth"]["root_domain"]
             valid_dom = dom and "!" not in dom
-            tags: list[str] = []
+            tags = []
             email: str | None = f"{first.lower()}.{last.lower()}@{dom}" if valid_dom else None
             if rng.random() < missing_rate * 0.6 or email is None:
                 email = None

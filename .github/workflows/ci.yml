@@ -33,9 +33,7 @@ jobs:
 
   backend-typecheck:
     runs-on: ubuntu-latest
-    # mypy is advisory for now: the codebase is not yet fully annotated and strictness
-    # will be ratcheted up incrementally. Failures are visible in logs but non-blocking.
-    continue-on-error: true
+    # mypy is clean across the package (0 errors / 77 files) and enforced as a gate.
     defaults:
       run:
         working-directory: apps/api

@@ -17,7 +17,7 @@ from relayiq.config import get_settings
 from relayiq.db import get_db
 from relayiq.enums import JobStatus
 from relayiq.logging_setup import get_logger
-from relayiq.models import EnrichmentJob, Tenant, WebhookDelivery
+from relayiq.models import Account, Contact, EnrichmentJob, Tenant, WebhookDelivery
 from relayiq.observability.metrics import WEBHOOKS
 from relayiq.schemas.enrichment import WebhookEnrichmentPayload
 from relayiq.services.entities import match_or_create_account, match_or_create_contact
@@ -98,6 +98,7 @@ async def enrichment_webhook(
         return {"accepted": True, "duplicate": True, "job_id": original.job_id}
 
     data = payload.entity.model_dump(exclude_none=True)
+    entity: Contact | Account
     if payload.entity_type == "contact":
         entity, _, _ = match_or_create_contact(db, tenant.id, data)
     else:

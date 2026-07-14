@@ -2,7 +2,9 @@
 
 import logging
 import re
+from collections.abc import MutableMapping
 from contextvars import ContextVar
+from typing import Any
 
 import structlog
 
@@ -29,7 +31,7 @@ REDACT_KEYS = {
 _EMAIL_RE = re.compile(r"([a-zA-Z0-9_.+-]{2})[a-zA-Z0-9_.+-]*(@[\w.-]+)")
 
 
-def redact_processor(_logger, _method, event_dict: dict) -> dict:
+def redact_processor(_logger: Any, _method: str, event_dict: MutableMapping[str, Any]) -> MutableMapping[str, Any]:  # noqa: E501
     for key in list(event_dict.keys()):
         if key.lower() in REDACT_KEYS:
             event_dict[key] = "[REDACTED]"
@@ -38,7 +40,7 @@ def redact_processor(_logger, _method, event_dict: dict) -> dict:
     return event_dict
 
 
-def add_correlation(_logger, _method, event_dict: dict) -> dict:
+def add_correlation(_logger: Any, _method: str, event_dict: MutableMapping[str, Any]) -> MutableMapping[str, Any]:  # noqa: E501
     cid = correlation_id_var.get()
     if cid:
         event_dict.setdefault("correlation_id", cid)

@@ -68,8 +68,11 @@ def list_contacts(
 
 
 def _entity(db: Session, principal: Principal, entity_type: str, entity_id: str):
-    model = Contact if entity_type == "contact" else Account
-    entity = db.get(model, entity_id)
+    entity: Contact | Account | None
+    if entity_type == "contact":
+        entity = db.get(Contact, entity_id)
+    else:
+        entity = db.get(Account, entity_id)
     if entity is None or entity.tenant_id != principal.tenant_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"{entity_type} not found")
     return entity

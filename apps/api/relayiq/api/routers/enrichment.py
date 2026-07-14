@@ -39,10 +39,8 @@ router = APIRouter(prefix="/v1/enrichment", tags=["enrichment"])
 def _resolve_entity(db: Session, tenant_id: str, body: EnrichmentRequestIn):
     data = body.entity.model_dump(exclude_none=True)
     if body.entity_type == EntityType.CONTACT.value:
-        entity, created, certainty = match_or_create_contact(db, tenant_id, data)
-    else:
-        entity, created, certainty = match_or_create_account(db, tenant_id, data)
-    return entity, created, certainty
+        return match_or_create_contact(db, tenant_id, data)
+    return match_or_create_account(db, tenant_id, data)
 
 
 def _check_callback(url: str | None) -> None:
@@ -124,7 +122,7 @@ def execute(
     if idem_key:
         claim = idempotency.claim(db, principal.tenant_id, "enrichment", idem_key, payload_hash)
         if claim.outcome == idempotency.ClaimOutcome.COMPLETED:
-            return JobOut(**claim.response_snapshot)
+            return JobOut(**(claim.response_snapshot or {}))
         if claim.outcome == idempotency.ClaimOutcome.IN_PROGRESS:
             raise HTTPException(status.HTTP_409_CONFLICT, "identical request is already in progress")
         if claim.outcome == idempotency.ClaimOutcome.MISMATCH:
@@ -185,7 +183,7 @@ def batch(
             idempotency.request_hash(body.model_dump(mode="json", exclude={"idempotency_key"})),
         )
         if claim.outcome == idempotency.ClaimOutcome.COMPLETED:
-            return BatchOut(**claim.response_snapshot)
+            return BatchOut(**(claim.response_snapshot or {}))
         if claim.outcome == idempotency.ClaimOutcome.IN_PROGRESS:
             raise HTTPException(status.HTTP_409_CONFLICT, "batch already in progress")
         if claim.outcome == idempotency.ClaimOutcome.MISMATCH:

@@ -75,8 +75,11 @@ def manual_sync(
     principal: Principal = Depends(require_operator),
     db: Session = Depends(get_db),
 ) -> dict:
-    model = Contact if body.entity_type == "contact" else Account
-    entity = db.get(model, body.entity_id)
+    entity: Contact | Account | None
+    if body.entity_type == "contact":
+        entity = db.get(Contact, body.entity_id)
+    else:
+        entity = db.get(Account, body.entity_id)
     if entity is None or entity.tenant_id != principal.tenant_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "entity not found")
     attempt = sync_entity(

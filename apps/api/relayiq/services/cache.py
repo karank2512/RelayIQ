@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import redis
 
@@ -73,7 +73,7 @@ class FieldCache:
     def get_field(self, tenant_id: str, entity_type: str, entity_key: str, field: str) -> CacheEntry:
         if not entity_key:
             return CacheEntry(status=CacheStatus.MISS)
-        raw = self.r.get(self._k(tenant_id, entity_type, entity_key, field))
+        raw = cast("str | None", self.r.get(self._k(tenant_id, entity_type, entity_key, field)))
         if raw is not None:
             try:
                 doc = json.loads(raw)
@@ -153,7 +153,7 @@ class FieldCache:
             f"{self.prefix}:{tenant_id}:neg:{entity_type}:{entity_key.lower()}:*",
         ):
             for key in self.r.scan_iter(match=pattern, count=200):
-                removed += self.r.delete(key)
+                removed += cast(int, self.r.delete(key))
         return removed
 
     def invalidate_field(self, tenant_id: str, entity_type: str, entity_key: str, field: str) -> None:

@@ -91,7 +91,8 @@ def cost_summary(session: Session, tenant_id: str, campaign_id: str | None = Non
         func.coalesce(func.sum(case((CostLedgerEntry.was_redundant, CostLedgerEntry.actual_cost_credits), else_=0)), 0),  # noqa: E501
         func.coalesce(func.sum(case((CostLedgerEntry.spent_on_stale, CostLedgerEntry.actual_cost_credits), else_=0)), 0),  # noqa: E501
         func.coalesce(func.sum(
-            case((CostLedgerEntry.record_rejected_later, CostLedgerEntry.actual_cost_credits), else_=0)), 0),
+            case((CostLedgerEntry.record_rejected_later.is_(True),
+                  CostLedgerEntry.actual_cost_credits), else_=0)), 0),
         func.count(CostLedgerEntry.id),
     ).where(CostLedgerEntry.tenant_id == tenant_id)
     if campaign_id:

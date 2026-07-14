@@ -190,6 +190,13 @@ def _obs_from_call(contact_id: str, r: EnrichmentCallResult, field_name: str) ->
     )
 
 
+def _obs_age(obs) -> int:
+    """Whole-day age of an observation (fields are always set by _obs_from_call)."""
+    if obs.retrieved_at is None or obs.source_timestamp is None:
+        return 0
+    return (obs.retrieved_at - obs.source_timestamp).days
+
+
 def _thresholds(field_name: str):
     return DEFAULTS.get(("contact", field_name), FALLBACK)
 
@@ -345,7 +352,7 @@ def _route_and_reconcile(stream, companies, providers, res, *, routes_for, cross
             # Buy a second opinion when the primary answer is stale on high-risk fields.
             for f in CROSS_CHECK_FIELDS & set(obs_by_field):
                 primary = obs_by_field[f][0]
-                age = (primary.retrieved_at - primary.source_timestamp).days
+                age = _obs_age(primary)
                 if age > _thresholds(f).fresh_days and len(obs_by_field[f]) == 1:
                     others = [p for p in routes_for(f) if p != primary.provider_key]
                     if others:
@@ -363,7 +370,7 @@ def _route_and_reconcile(stream, companies, providers, res, *, routes_for, cross
             if recon.outcome in (ReconciliationOutcome.AUTO_ACCEPT,
                                  ReconciliationOutcome.ACCEPT_WITH_WARNING) and recon.chosen:
                 chosen = recon.chosen
-                age = (chosen.retrieved_at - chosen.source_timestamp).days
+                age = _obs_age(chosen)
                 conf = score_field(FieldConfidenceInput(
                     provider_reliability_prior=PROVIDER_PRIORS.get(chosen.provider_key, 0.8),
                     field_quality_prior=0.85,

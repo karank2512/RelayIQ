@@ -147,11 +147,12 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
     registry = get_registry(session, refresh=True)
     campaign = session.get(Campaign, job.campaign_id) if job.campaign_id else None
     entity = _entity_for(session, job)
-    if entity is None:
+    if entity is None or job.entity_id is None:
         job.status = JobStatus.FAILED.value
         job.error = "entity not found"
         session.commit()
         return {}
+    entity_id: str = job.entity_id
     identifiers = _identifiers(job.entity_type, entity)
     entity_key = entity_lookup_key(job.entity_type, entity)
     summary: dict = {"fields_filled": 0, "providers_used": [], "served_from_cache": []}
@@ -164,7 +165,7 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
         decision = decision_engine.decide(
             session,
             decision_engine.DecisionInput(
-                tenant_id=job.tenant_id, entity_type=job.entity_type, entity_id=job.entity_id,
+                tenant_id=job.tenant_id, entity_type=job.entity_type, entity_id=entity_id,
                 requested_fields=list(job.requested_fields or []),
                 identifiers=identifiers, campaign=campaign, budget_state=bstate,
                 providers_available=any(registry.available(k) for k in registry.all()),
@@ -301,7 +302,7 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
                 result, req = execute_with_retries(
                     session, registry, adapter,
                     tenant_id=job.tenant_id, job_id=job.id, entity_type=job.entity_type,
-                    entity_id=job.entity_id, identifiers=identifiers, fields=pfields,
+                    entity_id=entity_id, identifiers=identifiers, fields=pfields,
                     trace_id=job.trace_id,
                 )
                 actual_cost += result.cost_credits
@@ -369,10 +370,12 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
             if not candidates or not registry.available(candidates[0]):
                 continue
             adapter2 = registry.get(candidates[0])
+            if adapter2 is None:
+                continue
             result2, req2 = execute_with_retries(
                 session, registry, adapter2,
                 tenant_id=job.tenant_id, job_id=job.id, entity_type=job.entity_type,
-                entity_id=job.entity_id, identifiers=identifiers, fields=[f],
+                entity_id=entity_id, identifiers=identifiers, fields=[f],
                 trace_id=job.trace_id,
             )
             actual_cost += result2.cost_credits
@@ -418,7 +421,7 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
     accepted_fields: dict[str, float] = {}
     with steps.run("reconciliation") as step:
         provider_priors = {
-            k: (registry.config(k).reliability_prior if registry.config(k) else 0.8)
+            k: (cfg.reliability_prior if (cfg := registry.config(k)) is not None else 0.8)
             for k in registry.all()
         }
         outcomes: dict[str, str] = {}
@@ -432,34 +435,34 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
                 )
             ).scalars().all()
             thresholds = staleness.get_thresholds(session, job.tenant_id, job.entity_type, f)
-            result = reconcile_field(
-                job.entity_type, f, all_obs,
+            recon = reconcile_field(
+                job.entity_type, f, list(all_obs),
                 provider_priors=provider_priors, thresholds=thresholds,
             )
             rd = ReconciliationDecision(
                 tenant_id=job.tenant_id, job_id=job.id, entity_type=job.entity_type,
                 entity_id=job.entity_id, field_name=f,
                 observation_ids=[o.id for o in all_obs],
-                outcome=result.outcome.value,
-                chosen_observation_id=result.chosen.id if result.chosen else None,
-                chosen_value=(result.chosen.normalized_value or result.chosen.raw_value)
-                if result.chosen else None,
-                reasoning=result.reasoning, factors=result.factors,
-                conflict_severity=result.conflict_severity,
+                outcome=recon.outcome.value,
+                chosen_observation_id=recon.chosen.id if recon.chosen else None,
+                chosen_value=(recon.chosen.normalized_value or recon.chosen.raw_value)
+                if recon.chosen else None,
+                reasoning=recon.reasoning, factors=recon.factors,
+                conflict_severity=recon.conflict_severity,
             )
             session.add(rd)
             session.flush()
-            outcomes[f] = result.outcome.value
+            outcomes[f] = recon.outcome.value
             from relayiq.observability.metrics import RECONCILIATIONS
 
-            RECONCILIATIONS.labels(outcome=result.outcome.value).inc()
+            RECONCILIATIONS.labels(outcome=recon.outcome.value).inc()
 
-            if result.outcome in (ReconciliationOutcome.AUTO_ACCEPT,
-                                  ReconciliationOutcome.ACCEPT_WITH_WARNING):
-                chosen = result.chosen
+            if recon.outcome in (ReconciliationOutcome.AUTO_ACCEPT,
+                                 ReconciliationOutcome.ACCEPT_WITH_WARNING) and recon.chosen:
+                chosen = recon.chosen
                 chosen.is_selected = True
                 score = _field_confidence(
-                    session, job, f, chosen, result, provider_priors, thresholds
+                    session, job, f, chosen, recon, provider_priors, thresholds
                 )
                 accepted_fields[f] = score
                 state = staleness.classify(
@@ -467,7 +470,7 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
                     age_days=_obs_age_days(chosen),
                 )
                 upsert_canonical_value(
-                    session, job.tenant_id, job.entity_type, job.entity_id, f,
+                    session, job.tenant_id, job.entity_type, entity_id, f,
                     value=chosen.raw_value, normalized_value=chosen.normalized_value,
                     confidence=score, observation_id=chosen.id,
                     reconciliation_decision_id=rd.id, staleness_state=state.value,
@@ -481,20 +484,20 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
                     ttl_seconds=thresholds.stale_days * 86400,
                     soft_ttl_seconds=thresholds.fresh_days * 86400,
                 )
-            elif result.outcome == ReconciliationOutcome.REQUIRE_REVIEW:
+            elif recon.outcome == ReconciliationOutcome.REQUIRE_REVIEW:
                 review_fields.append(f)
                 create_task(
-                    session, job.tenant_id, entity_type=job.entity_type, entity_id=job.entity_id,
-                    field_name=f, reason=result.reasoning[:300], job_id=job.id,
+                    session, job.tenant_id, entity_type=job.entity_type, entity_id=entity_id,
+                    field_name=f, reason=recon.reasoning[:300], job_id=job.id,
                     reconciliation_decision_id=rd.id,
                     confidence=_field_confidence(
-                        session, job, f, result.chosen, result, provider_priors, thresholds
-                    ) if result.chosen else None,
-                    suggested_value=(result.chosen.normalized_value or result.chosen.raw_value)
-                    if result.chosen else None,
-                    suggested_observation_id=result.chosen.id if result.chosen else None,
+                        session, job, f, recon.chosen, recon, provider_priors, thresholds
+                    ) if recon.chosen else None,
+                    suggested_value=(recon.chosen.normalized_value or recon.chosen.raw_value)
+                    if recon.chosen else None,
+                    suggested_observation_id=recon.chosen.id if recon.chosen else None,
                 )
-            elif result.outcome == ReconciliationOutcome.REJECT_ALL:
+            elif recon.outcome == ReconciliationOutcome.REJECT_ALL:
                 for o in all_obs:
                     o.is_rejected = True
                     o.rejection_reason = "all observations failed validation"
@@ -520,7 +523,7 @@ def run_enrichment_job(session: Session, job_id: str, *, cache: FieldCache | Non
         low_confidence_review = not auto_accept and not review_fields and bool(accepted_fields)
         if low_confidence_review:
             create_task(
-                session, job.tenant_id, entity_type=job.entity_type, entity_id=job.entity_id,
+                session, job.tenant_id, entity_type=job.entity_type, entity_id=entity_id,
                 field_name=None,
                 reason=f"entity confidence {entity_result.score:.2f} below campaign minimum {min_conf:.2f}",
                 job_id=job.id, confidence=entity_result.score,
