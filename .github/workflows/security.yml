@@ -56,7 +56,8 @@ jobs:
       - name: Build API image for scanning (no push)
         run: docker build -t relayiq-api:scan apps/api
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
+        # Note: this action's release tags are v-prefixed (0.28.0-style tags don't resolve)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: relayiq-api:scan
           format: table
