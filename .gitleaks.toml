@@ -1,0 +1,24 @@
+# Gitleaks configuration for RelayIQ. Extends the upstream default ruleset (so all default
+# secret detection stays active) and narrowly exempts ONE thing: the generic entropy rule
+# firing on synthetic test fixtures in the hardening test file.
+#
+# Why: apps/api/tests/unit/test_security_hardening.py exercises the production config
+# validator, whose entropy floor (>=32 chars, >=8 distinct) requires realistic-looking
+# secrets. Those fixtures are synthetic — they authorize nothing and are generated at
+# runtime on HEAD (no high-entropy literal remains in current source). A historical commit
+# briefly embedded them as literals; this scoped allowlist keeps a full-history scan clean
+# without force-rewriting already-pushed history.
+#
+# Scope is deliberately tight: only the `generic-api-key` rule, only this one file. Every
+# other rule in this file, and `generic-api-key` in every other file, is still enforced
+# (verified: a random secret planted in another file is still caught).
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+  [rules.allowlist]
+  description = "Synthetic secret fixtures for the config-validator entropy tests"
+  paths = ['''apps/api/tests/unit/test_security_hardening\.py''']

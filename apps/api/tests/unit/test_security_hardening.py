@@ -1,6 +1,7 @@
 """Unit tests for the production-hardening layer: config fail-fast validation and the
 Redis-backed rate limiter."""
 
+import string
 import time
 
 import fakeredis
@@ -9,6 +10,13 @@ import pytest
 from relayiq.api.routers.webhooks import _resolve_webhook_secrets
 from relayiq.config import ProductionConfigError, Settings, validate_production_settings
 from relayiq.services.ratelimit import RateLimiter
+
+
+def _strong_secret(salt: str) -> str:
+    """A deterministic, obviously-synthetic 'valid' secret for the entropy checks — built
+    at runtime from the public alphabet so NO high-entropy literal ever appears in source
+    (keeps secret scanners quiet; these are test fixtures, not credentials)."""
+    return (salt + "-" + string.ascii_letters + string.digits)[:40]
 
 
 class _FakeTenant:
@@ -50,11 +58,13 @@ class TestWebhookSecretResolution:
 
 GOOD = dict(
     RELAYIQ_ENV="production",
-    RELAYIQ_JWT_SECRET="Jq7km2vP4wL8nR3tY6uZ1aB5cD0eF2gH9xW",
-    RELAYIQ_WEBHOOK_SECRETS="h4j8Km1nP5qR9sT2vW6xZ0aC3dE7fG1hK",
-    DATABASE_URL="postgresql+psycopg://relayiq:strong-unique-password@db.internal:5432/relayiq",
+    RELAYIQ_JWT_SECRET=_strong_secret("jwt"),
+    RELAYIQ_WEBHOOK_SECRETS=_strong_secret("webhook"),
+    DATABASE_URL=(
+        "postgresql+psycopg://relayiq:" + _strong_secret("dbpw") + "@db.internal:5432/relayiq"
+    ),
     RELAYIQ_CORS_ORIGINS="https://app.example.com",
-    RELAYIQ_METRICS_TOKEN="m3N7pQ1rS5tV9wX2yZ4aB8cD6eF0gH2j",
+    RELAYIQ_METRICS_TOKEN=_strong_secret("metrics"),
 )
 
 
@@ -77,7 +87,9 @@ class TestProductionConfigValidation:
             validate_production_settings(make_settings(RELAYIQ_JWT_SECRET="short"))
 
     def test_dev_webhook_secret_rejected(self):
-        s = make_settings(RELAYIQ_WEBHOOK_SECRETS="h4j8Km1nP5qR9sT2vW6xZ0aC3dE7fG1hK,dev_only_webhook_secret")
+        s = make_settings(
+            RELAYIQ_WEBHOOK_SECRETS=_strong_secret("webhook") + ",dev_only_webhook_secret"
+        )
         with pytest.raises(ProductionConfigError, match="webhook secret"):
             validate_production_settings(s)
 
