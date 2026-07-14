@@ -27,6 +27,11 @@ os.environ.setdefault(
 )
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ["RELAYIQ_SYNTHETIC_WORLD_PATH"] = str(API_ROOT / "data" / "synthetic_world.json")
+# Rate limits off for the suite (hundreds of logins from one client IP); the dedicated
+# rate-limit tests re-enable them via monkeypatch + reset_rate_limiter.
+os.environ.setdefault("RELAYIQ_RATE_LIMIT_LOGIN_PER_MINUTE", "0")
+os.environ.setdefault("RELAYIQ_RATE_LIMIT_WEBHOOK_PER_MINUTE", "0")
+os.environ.setdefault("RELAYIQ_RATE_LIMIT_API_PER_MINUTE", "0")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

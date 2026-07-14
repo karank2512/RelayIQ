@@ -20,7 +20,7 @@ review (see `SECURITY.md`). Each threat below maps to the implemented mitigation
 | 8 | SSRF via callback URLs | Validation at intake (`api/routers/enrichment.py::_check_callback`) **and re-validation at send time** (`relayiq/workers/tasks.py::_maybe_callback`) using `relayiq/services/ssrf.py` | validate-then-fetch TOCTOU: `httpx.post` does not pin the resolved IP |
 | 9 | Malicious provider payloads | Normalization + format validation before storage (`relayiq/canonical/normalize.py` via `engines/orchestrator.py::_persist_observation`); error-normalized adapter contract (`providers/base.py`) | Real-vendor payload handling untested (simulators only); raw payload retention rules are policy (ADR-012) |
 | 10 | Sensitive data in logs | structlog redaction processor: secret-key redaction + email masking (`relayiq/logging_setup.py`); webhook failures log reason class only | Regex/key-based redaction misses nested or renamed fields; Redis cache keys embed emails (ADR-003) |
-| 11 | Retry storms | Bounded adapter retries (`providers/base.py::RetryPolicy`, `services/provider_exec.py`); circuit breaker (5 failures → open, 30 s cooldown, `providers/registry.py`); ≤4 fallback rounds (`engines/orchestrator.py`); Celery `max_retries=3` w/ backoff (`workers/tasks.py`) | Breaker + limiter are per-process, not shared across workers |
+| 11 | Retry storms | Bounded adapter retries (`providers/base.py::RetryPolicy`, `services/provider_exec.py`); circuit breaker (5 failures → open, 30 s cooldown, `providers/registry.py`); ≤4 fallback rounds (`engines/orchestrator.py`); Celery `max_retries=3` w/ backoff (`workers/tasks.py`) | Breaker state is Redis-shared across workers (in-process fallback); the simulator's own rate limiter remains per-process by design |
 | 12 | Budget exhaustion | Atomic guarded-UPDATE reservation: `spent+reserved+X <= limit` evaluated in the DB (`relayiq/services/budget.py::reserve`); per-record caps; degradation modes | Soft budgets never block (by design); no budget = unlimited spend for that scope |
 | 13 | Cache poisoning | Keys scoped `riq:{schema_version}:{tenant_id}:...`; Postgres remains source of truth (ADR-002); corrupt JSON → miss; version bump orphans all entries (`relayiq/services/cache.py`) | Anyone with Redis network access can write keys — isolation is prefix convention, not ACL |
 | 14 | Race conditions / double-spend | DB unique constraints: idempotency `(tenant,scope,key)` (`services/idempotency.py`), webhook delivery (§3), CRM sync `(tenant, idempotency_key)` (`models/crm.py`); one-open-review-task upsert (`services/review.py::create_task`); lock token compare-and-delete Lua (`services/cache.py`) | Idempotency expiry re-claims are "race-safe enough" per code comment, not strictly serialized |
@@ -40,10 +40,13 @@ short-circuiting, so timing reveals nothing about rotation state. A duplicate
 delivery returns `duplicate: true` with the original `job_id` and spends nothing —
 this exact behavior is covered by the e2e duplicate-webhook scenario.
 
-**Accepted weakness (documented, not hidden):** secrets are deployment-global and the
-tenant is resolved from `payload.tenant_slug`. Isolation between *senders* therefore
-does not exist at the webhook layer; budgets (§12) bound the damage. Per-tenant
-secrets are the planned fix (ADR-011 revisit conditions).
+**Sender isolation:** a tenant that configures `tenant.settings["webhook_secrets"]`
+is verified ONLY against those secrets — the global set cannot authorize its
+deliveries (`api/routers/webhooks.py::_peek_tenant_slug` selects the secret set from
+the not-yet-trusted payload; nothing else is read before HMAC verification). Tenants
+without their own secrets still share the deployment-global set, so multi-tenant
+production deployments should scope every tenant (docs/production-checklist.md §3);
+budgets (§12) bound residual damage in the shared-secret configuration.
 
 ### 4. Credential exposure
 

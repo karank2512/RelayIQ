@@ -46,23 +46,29 @@ Listed honestly; none of these are hidden behind marketing language.
 
 1. **Development JWT auth, not OAuth.** Login is bcrypt-verified users + HS256 JWTs
    signed with a single shared secret (`RELAYIQ_JWT_SECRET`). This is a documented
-   development substitute for a real OAuth/OIDC integration. Dev default secrets
-   (`dev_only_...`) exist and MUST be overridden outside local development. There is
-   no token revocation list — deactivating a user takes effect on the next request
-   (claims are re-checked against the DB), but a stolen *signing secret* mints valid
-   tokens until rotated.
-2. **One shared webhook secret set authorizes any tenant's enrichment.** The webhook
-   endpoint resolves the tenant from the payload's `tenant_slug` while HMAC secrets
-   are deployment-global (`RELAYIQ_WEBHOOK_SECRETS`). Any party holding a valid
-   secret can enqueue (budget-bounded) enrichment for any tenant. Documented in
-   ADR-011 and the threat model; per-tenant secrets are the planned fix.
-3. **Rate limiter and circuit breaker are per-process.** The provider rate limiter
-   (`_SlidingWindowLimiter`) and `CircuitBreaker` live in process memory. With
-   multiple API/worker processes, effective limits multiply and breaker state is not
-   shared. Redis-backed versions are roadmap items.
+   development substitute for a real OAuth/OIDC integration. With
+   `RELAYIQ_ENV=production` the app **refuses to boot** on dev-placeholder or
+   short (<32 char) secrets (`relayiq/config.py::validate_production_settings`).
+   There is no token revocation list — deactivating a user takes effect on the next
+   request (claims are re-checked against the DB), but a stolen *signing secret*
+   mints valid tokens until rotated. Login attempts are rate-limited
+   (default 5/min per client IP, Redis-backed).
+2. **Webhook secrets are global by default; per-tenant scoping is opt-in.** A
+   tenant that sets `tenant.settings["webhook_secrets"]` is verified ONLY against
+   its own secrets — the global set no longer authorizes its deliveries
+   (`api/routers/webhooks.py`; see docs/production-checklist.md §3). Tenants
+   without their own secrets still share `RELAYIQ_WEBHOOK_SECRETS`, so multi-tenant
+   production deployments should configure per-tenant secrets for every tenant.
+3. **Simulated-provider rate limits are per-process.** The `CircuitBreaker` now
+   shares state across processes via Redis (with in-process fallback if Redis is
+   down), and API rate limiting is Redis-backed (`services/ratelimit.py`). What
+   remains per-process is the *simulator's* `_SlidingWindowLimiter`, which models
+   the upstream provider's own limit — a real provider adapter should implement its
+   vendor's documented limits.
 4. **No external security review.** This codebase has been internally reviewed and
-   tested (302 passing tests including concurrency and webhook-security suites) but
-   has **not** undergone an independent security audit or penetration test.
+   tested (325 passing tests including concurrency, webhook-security, and
+   production-hardening suites) but has **not** undergone an independent security
+   audit or penetration test.
 5. **Providers are simulated.** All enrichment providers are deterministic simulators
    (ADR-009); the HubSpot CRM adapter is implemented and fixture-tested but live
    synchronization has not been verified. Handling of hostile *real-world* provider
@@ -71,10 +77,14 @@ Listed honestly; none of these are hidden behind marketing language.
    discipline (ADR-010). A missed `tenant_id` filter would be a cross-tenant read.
 7. **PII in Redis key names.** Field-cache keys embed lowercased emails/domains
    (ADR-003); anyone with Redis access can enumerate them.
-8. **No per-client API rate limiting.** Budgets bound spend; nothing bounds
-   read-path request volume per token.
-9. **Seeded demo credentials.** Local/dev seeding creates documented demo users with
-   a published password; never run the seeder against a production database.
+8. **API rate limits are per-IP, not per-token.** Redis-backed limits protect
+   login (5/min), webhooks (120/min) and the general API (600/min) per client IP
+   (`RELAYIQ_RATE_LIMIT_*`); the limiter fails open on Redis outages by design.
+   Per-token/tenant quotas beyond budgets are not implemented.
+9. **Seeded demo credentials.** Local/dev seeding creates documented demo users
+   with a published password. The seeder now **refuses to run** when
+   `RELAYIQ_ENV=production` unless explicitly forced with per-role passwords
+   supplied via the environment (`relayiq/seed/cli.py::_production_seed_guard`).
 
 ## Secrets handling
 

@@ -1,5 +1,7 @@
 """RelayIQ API application factory."""
 
+import hmac
+import re
 import time
 import uuid
 
@@ -26,9 +28,32 @@ from relayiq.observability.tracing import configure_tracing
 
 log = get_logger("api")
 
+# Client-supplied correlation ids are echoed back — accept a conservative charset only.
+_CORRELATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
+
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+    # HSTS is meaningful only behind TLS; harmless otherwise. Deployment guidance
+    # (docs/production-checklist.md) assumes TLS termination at the edge (Fly/ALB/nginx).
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+}
+
+
+def _rate_limit_scope(path: str) -> tuple[str, int] | None:
+    """(scope, per-minute limit) for paths under explicit limits; None = default limit."""
+    settings = get_settings()
+    if path.startswith("/v1/auth/login"):
+        return ("login", settings.rate_limit_login_per_minute)
+    if path.startswith("/v1/webhooks/"):
+        return ("webhook", settings.rate_limit_webhook_per_minute)
+    return None
+
 
 def create_app() -> FastAPI:
-    settings = get_settings()
+    settings = get_settings()  # validates production config at startup (fail fast)
     configure_logging(settings.log_level)
     configure_tracing()
 
@@ -40,21 +65,62 @@ def create_app() -> FastAPI:
             "confidence scoring, human review, CRM sync gating, and a full cost ledger. "
             "Providers are SIMULATED in this build; see docs for live-integration status."
         ),
-        docs_url="/docs",
-        openapi_url="/openapi.json",
+        docs_url="/docs" if settings.expose_docs else None,
+        redoc_url="/redoc" if settings.expose_docs else None,
+        openapi_url="/openapi.json" if settings.expose_docs else None,
     )
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=settings.cors_origin_list,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Correlation-Id"],
     )
 
     @app.middleware("http")
+    async def hardening_middleware(request: Request, call_next):
+        # Request body cap — reject oversized payloads before they reach handlers.
+        declared = request.headers.get("content-length")
+        if declared is not None:
+            try:
+                if int(declared) > settings.max_body_bytes:
+                    return JSONResponse(
+                        status_code=413,
+                        content={"error": {"code": "payload_too_large",
+                                           "message": "request body too large"}},
+                    )
+            except ValueError:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": {"code": "bad_request", "message": "invalid content-length"}},
+                )
+
+        # Rate limiting: strict per-scope limits on login/webhooks, broad default elsewhere.
+        from relayiq.services.ratelimit import get_rate_limiter
+
+        client_ip = request.client.host if request.client else "unknown"
+        scoped = _rate_limit_scope(request.url.path)
+        limiter = get_rate_limiter()
+        if scoped is not None:
+            scope, limit = scoped
+            allowed = limiter.allow(scope, client_ip, limit)
+        else:
+            allowed = limiter.allow("api", client_ip, settings.rate_limit_api_per_minute)
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                headers={"Retry-After": "60", **SECURITY_HEADERS},
+                content={"error": {"code": "rate_limited",
+                                   "message": "too many requests — retry later"}},
+            )
+
+        return await call_next(request)
+
+    @app.middleware("http")
     async def observability_middleware(request: Request, call_next):
-        correlation_id = request.headers.get("X-Correlation-Id") or uuid.uuid4().hex
+        supplied = request.headers.get("X-Correlation-Id", "")
+        correlation_id = supplied if _CORRELATION_ID_RE.match(supplied) else uuid.uuid4().hex
         correlation_id_var.set(correlation_id)
         start = time.perf_counter()
         try:
@@ -75,11 +141,20 @@ def create_app() -> FastAPI:
         HTTP_REQUESTS.labels(request.method, route_path, str(response.status_code)).inc()
         HTTP_LATENCY.labels(request.method, route_path).observe(elapsed)
         response.headers["X-Correlation-Id"] = correlation_id
+        for header, value in SECURITY_HEADERS.items():
+            response.headers.setdefault(header, value)
         return response
 
     if settings.metrics_enabled:
         @app.get("/metrics", include_in_schema=False)
-        def metrics_endpoint() -> Response:
+        def metrics_endpoint(request: Request) -> Response:
+            # When a metrics token is configured, require it (constant-time comparison).
+            if settings.metrics_token:
+                supplied = request.headers.get("Authorization", "")
+                expected = f"Bearer {settings.metrics_token}"
+                if not hmac.compare_digest(supplied.encode(), expected.encode()):
+                    return JSONResponse(status_code=401, content={"error": {
+                        "code": "unauthorized", "message": "metrics token required"}})
             return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     try:

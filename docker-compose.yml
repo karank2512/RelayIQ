@@ -5,7 +5,8 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: relayiq
-      POSTGRES_PASSWORD: relayiq_dev_password
+      # Dev default; override via .env for anything beyond local development.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relayiq_dev_password}
       POSTGRES_DB: relayiq
     ports:
       # Host port 5433 avoids clashing with a locally installed Postgres on 5432
@@ -38,7 +39,7 @@ services:
              uvicorn relayiq.main:app --host 0.0.0.0 --port 8000"
     environment: &backend_env
       RELAYIQ_ENV: development
-      DATABASE_URL: postgresql+psycopg://relayiq:relayiq_dev_password@postgres:5432/relayiq
+      DATABASE_URL: postgresql+psycopg://relayiq:${POSTGRES_PASSWORD:-relayiq_dev_password}@postgres:5432/relayiq
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2

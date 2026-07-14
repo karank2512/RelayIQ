@@ -1,3 +1,6 @@
+> **Before any production deploy, work through [production-checklist.md](production-checklist.md)** —
+> the app fail-fast validates its configuration when `RELAYIQ_ENV=production`.
+
 # RelayIQ — Deployment Guide
 
 RelayIQ ships as one backend image (FastAPI API + Celery worker, same image,

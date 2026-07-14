@@ -32,7 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.2,<9",
+    "pytest>=9.0.3,<10",  # >=9.0.3: PYSEC-2026-1845
     "pytest-cov>=5.0",
     "fakeredis[lua]>=2.23,<3",  # [lua] enables EVAL for the cache stampede-lock tests
     "respx>=0.21,<1",

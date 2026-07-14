@@ -6,6 +6,7 @@ delivery returns 200 with duplicate=true and spends nothing.
 """
 
 import hashlib
+import json
 
 from fastapi import APIRouter, Depends, Header, Request, Response, status
 from pydantic import ValidationError
@@ -27,6 +28,17 @@ router = APIRouter(prefix="/v1/webhooks", tags=["webhooks"])
 log = get_logger("webhooks")
 
 
+def _peek_tenant_slug(raw_body: bytes) -> str | None:
+    """Extract tenant_slug from the (not-yet-authenticated) body ONLY to select which
+    secrets verify the signature. Nothing else is read or acted on before verification."""
+    try:
+        doc = json.loads(raw_body)
+        slug = doc.get("tenant_slug") if isinstance(doc, dict) else None
+        return slug if isinstance(slug, str) and len(slug) <= 80 else None
+    except (ValueError, TypeError):
+        return None
+
+
 @router.post("/enrichment")
 async def enrichment_webhook(
     request: Request,
@@ -38,8 +50,19 @@ async def enrichment_webhook(
     settings = get_settings()
     raw_body = await request.body()
 
+    # Tenant-scoped secrets: when a tenant configures its own webhook secrets
+    # (tenant.settings["webhook_secrets"]), ONLY those verify its deliveries — the
+    # global secret cannot authorize enrichment for that tenant (threat model §5).
+    slug = _peek_tenant_slug(raw_body)
+    tenant = (
+        db.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none()
+        if slug else None
+    )
+    tenant_secrets = list((tenant.settings or {}).get("webhook_secrets", [])) if tenant else []
+    secrets = tenant_secrets or settings.webhook_secret_list
+
     verdict = verify_webhook(
-        signature, raw_body, settings.webhook_secret_list,
+        signature, raw_body, secrets,
         replay_window_seconds=settings.webhook_replay_window_seconds,
     )
     if not verdict.ok:
@@ -65,9 +88,6 @@ async def enrichment_webhook(
         response.status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
         return {"accepted": False, "reason": "invalid payload", "errors": exc.errors()[:5]}
 
-    tenant = db.execute(
-        select(Tenant).where(Tenant.slug == payload.tenant_slug)
-    ).scalar_one_or_none()
     if tenant is None:
         WEBHOOKS.labels(source="enrichment", result="unknown_tenant").inc()
         response.status_code = status.HTTP_404_NOT_FOUND

@@ -41,8 +41,28 @@ DEMO_USERS = [
 DEFAULT_DEV_PASSWORD = "relayiq-demo-password"  # noqa: S105 — documented dev-only default
 
 
+def _production_seed_guard(settings) -> None:
+    """Demo data carries documented default passwords — never let it near production
+    unless explicitly forced AND every seed password is supplied via the environment."""
+    if not settings.is_production:
+        return
+    if os.environ.get("RELAYIQ_SEED_ALLOW_PRODUCTION") != "1":
+        print(  # noqa: T201
+            "seed: refusing to seed demo data in production. This creates demo users and "
+            "synthetic records. If you really want this (staging smoke test), set "
+            "RELAYIQ_SEED_ALLOW_PRODUCTION=1 and provide RELAYIQ_SEED_*_PASSWORD for "
+            "every role."
+        )
+        sys.exit(2)
+    missing = [env for _, _, env in DEMO_USERS if not os.environ.get(env)]
+    if missing:
+        print(f"seed: production seeding requires explicit passwords; missing: {missing}")  # noqa: T201
+        sys.exit(2)
+
+
 def seed(reset: bool = False, if_empty: bool = False, world_path: str | None = None) -> None:
     settings = get_settings()
+    _production_seed_guard(settings)
     session = get_sessionmaker()()
     try:
         existing = session.execute(select(Tenant)).scalars().first()

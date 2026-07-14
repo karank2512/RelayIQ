@@ -180,10 +180,18 @@ OAuth substitute and this build has **not** had an external security review.
   conflict/staleness rates (configurable — rerun with your own assumptions).
 - Confidence is measurably miscalibrated (ECE 0.091) — it ranks well but is not a probability;
   the learned-model path is designed, not built.
-- Rate limiting and circuit breakers are per-process (single-node); Redis-backed versions are
-  roadmap items.
 - Live Clay/HubSpot verification, Salesforce, and multi-region are not implemented.
 - Load-test numbers in `docs/benchmarks/` are from a development laptop.
+- Auth is JWT + seeded users (a documented OAuth substitute) — wire your IdP before exposing
+  this to an organization; no external security audit has been performed.
+
+## Production hardening
+
+With `RELAYIQ_ENV=production` the app **refuses to boot** on dev-default/weak secrets,
+localhost/wildcard CORS, or an unprotected `/metrics`. Redis-backed rate limiting (login,
+webhooks, API), shared circuit breakers, security headers + CSP, request-body caps,
+per-tenant webhook secrets, and a production seed guard are built in — work through
+[docs/production-checklist.md](docs/production-checklist.md) before deploying.
 
 ## Why this matters to a RevOps buyer
 

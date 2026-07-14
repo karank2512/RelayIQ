@@ -50,3 +50,6 @@ CRM_GATE = Counter("relayiq_crm_gate_total", "CRM gate outcomes", ["outcome"])
 WEBHOOKS = Counter("relayiq_webhooks_total", "Webhook deliveries", ["source", "result"])
 BUDGET_BLOCKS = Counter("relayiq_budget_blocks_total", "Requests blocked by budget", ["kind"])
 QUEUE_DEPTH = Gauge("relayiq_review_queue_depth", "Pending review tasks")
+RATE_LIMITED = Counter(
+    "relayiq_rate_limited_total", "Requests rejected by the API rate limiter", ["scope"]
+)

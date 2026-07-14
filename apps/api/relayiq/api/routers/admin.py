@@ -146,6 +146,7 @@ def create_routing_policy(
             is_active=body.activate,
         )
         db.add(row)
+        db.flush()  # populate row.id before it lands in the audit record
     audit.record(db, principal.tenant_id, action="routing_policy.upsert", object_type="routing_policy",
                  object_id=row.id, actor_user_id=principal.user_id, actor_type="user",
                  after={"name": body.name, "version": row.version})
@@ -200,6 +201,7 @@ def upsert_staleness_policy(
     if row is None:
         row = StalenessPolicy(tenant_id=principal.tenant_id, **body.model_dump())
         db.add(row)
+        db.flush()  # populate row.id before it lands in the audit record
     else:
         row.fresh_days, row.aging_days, row.stale_days = body.fresh_days, body.aging_days, body.stale_days
     audit.record(db, principal.tenant_id, action="staleness_policy.upsert",
@@ -263,6 +265,7 @@ def create_campaign(
 ) -> dict:
     row = Campaign(tenant_id=principal.tenant_id, **body.model_dump())
     db.add(row)
+    db.flush()  # populate row.id before it lands in the audit record
     audit.record(db, principal.tenant_id, action="campaign.create", object_type="campaign",
                  object_id=row.id, actor_user_id=principal.user_id, actor_type="user",
                  after=body.model_dump())
@@ -298,6 +301,7 @@ def create_budget(
         **{**body.model_dump(), "kind": body.kind.value, "period": body.period.value},
     )
     db.add(row)
+    db.flush()  # populate row.id before it lands in the audit record
     audit.record(db, principal.tenant_id, action="budget.create", object_type="budget",
                  object_id=row.id, actor_user_id=principal.user_id, actor_type="user",
                  after=body.model_dump(mode="json"))
@@ -333,6 +337,7 @@ def create_suppression(
     row = Suppression(tenant_id=principal.tenant_id, kind=body.kind,
                       value=body.value.lower().strip(), reason=body.reason)
     db.add(row)
+    db.flush()  # populate row.id before it lands in the audit record
     audit.record(db, principal.tenant_id, action="suppression.create", object_type="suppression",
                  object_id=row.id, actor_user_id=principal.user_id, actor_type="user",
                  after=body.model_dump())

@@ -1,6 +1,11 @@
 """Shared unit-test fixtures: dedicated in-memory SQLite engine (independent of env/config)
 and fakeredis. Services under test all accept an explicit Session, so no global state."""
 
+import os
+
+# Unit tests must not touch a real Redis: keep circuit-breaker state in-process.
+os.environ["RELAYIQ_SHARED_BREAKER"] = "0"
+
 import fakeredis
 import pytest
 from sqlalchemy import create_engine
