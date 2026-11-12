@@ -184,8 +184,12 @@ def baseline_and_decomposition(pairs: list[tuple[float, bool]]) -> dict:
     unc = o_bar * (1.0 - o_bar)
     baseline_brier_direct = math.fsum((o_bar - oi) ** 2 for oi in o) / n  # cross-check of the closed form
 
-    rows = []
-    rel_terms, res_terms, wv_terms, wc_terms, grouped_terms = [], [], [], [], []
+    rows: list[dict] = []
+    rel_terms: list[float] = []
+    res_terms: list[float] = []
+    wv_terms: list[float] = []
+    wc_terms: list[float] = []
+    grouped_terms: list[float] = []
     for k in range(N_BUCKETS):
         members = [i for i, b in enumerate(idx) if b == k]
         nk = len(members)
