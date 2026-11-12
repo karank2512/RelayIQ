@@ -66,11 +66,156 @@
       "accuracy": 0.8131
     }
   ],
-  "generated_at": "2026-07-12T00:09:35+00:00",
+  "constant_baseline": {
+    "label": "IN-SAMPLE prevalence reference: the constant is the observed accuracy of this same synthetic sample, so it uses the outcomes being scored. It is not an independent held-out predictor and not a fair deployable comparator.",
+    "constant_confidence": 0.808429,
+    "brier": 0.154871,
+    "brier_direct_check": 0.154871,
+    "formula": "brier = accuracy * (1 - accuracy)",
+    "rules_v1_brier_raw": 0.164159,
+    "rules_v1_minus_baseline_brier": 0.009288,
+    "brier_skill_score_vs_in_sample_baseline": -0.059971,
+    "denominator_N": 783
+  },
+  "decomposition": {
+    "note": "Murphy identity (reliability - resolution + uncertainty) is exact for brier_grouped, NOT for brier_raw. brier_raw = brier_grouped + grouping_residual.",
+    "denominator_N": 783,
+    "weighting": "bucket terms weighted by n_k / N (count-weighted); empty buckets skipped",
+    "bucket_scheme": "10 equal-width buckets [0.0,0.1) ... [0.9,1.0]; same as reliability_table",
+    "brier_raw": 0.164159,
+    "brier_grouped": 0.164162,
+    "reliability": 0.010905,
+    "resolution": 0.001614,
+    "uncertainty": 0.154871,
+    "murphy_grouped_brier": 0.164162,
+    "grouping_residual": -3e-06,
+    "within_bin_confidence_variance": 0.000238,
+    "within_bin_covariance": 0.000121,
+    "confidence_varies_within_bins": true,
+    "by_bucket": [
+      {
+        "bucket": "0.0-0.1",
+        "n": 0,
+        "weight_n_k_over_N": 0.0,
+        "mean_confidence": null,
+        "accuracy": null,
+        "confidence_min": null,
+        "confidence_max": null,
+        "reliability_contribution": 0.0,
+        "resolution_contribution": 0.0
+      },
+      {
+        "bucket": "0.1-0.2",
+        "n": 0,
+        "weight_n_k_over_N": 0.0,
+        "mean_confidence": null,
+        "accuracy": null,
+        "confidence_min": null,
+        "confidence_max": null,
+        "reliability_contribution": 0.0,
+        "resolution_contribution": 0.0
+      },
+      {
+        "bucket": "0.2-0.3",
+        "n": 0,
+        "weight_n_k_over_N": 0.0,
+        "mean_confidence": null,
+        "accuracy": null,
+        "confidence_min": null,
+        "confidence_max": null,
+        "reliability_contribution": 0.0,
+        "resolution_contribution": 0.0
+      },
+      {
+        "bucket": "0.3-0.4",
+        "n": 5,
+        "weight_n_k_over_N": 0.006386,
+        "mean_confidence": 0.3808,
+        "accuracy": 0.6,
+        "confidence_min": 0.3675,
+        "confidence_max": 0.3949,
+        "reliability_contribution": 0.000307,
+        "resolution_contribution": 0.000277
+      },
+      {
+        "bucket": "0.4-0.5",
+        "n": 9,
+        "weight_n_k_over_N": 0.011494,
+        "mean_confidence": 0.454056,
+        "accuracy": 0.555556,
+        "confidence_min": 0.4137,
+        "confidence_max": 0.4993,
+        "reliability_contribution": 0.000118,
+        "resolution_contribution": 0.000735
+      },
+      {
+        "bucket": "0.5-0.6",
+        "n": 13,
+        "weight_n_k_over_N": 0.016603,
+        "mean_confidence": 0.508108,
+        "accuracy": 0.846154,
+        "confidence_min": 0.5008,
+        "confidence_max": 0.5152,
+        "reliability_contribution": 0.001897,
+        "resolution_contribution": 2.4e-05
+      },
+      {
+        "bucket": "0.6-0.7",
+        "n": 14,
+        "weight_n_k_over_N": 0.01788,
+        "mean_confidence": 0.685057,
+        "accuracy": 0.928571,
+        "confidence_min": 0.6718,
+        "confidence_max": 0.6997,
+        "reliability_contribution": 0.00106,
+        "resolution_contribution": 0.000258
+      },
+      {
+        "bucket": "0.7-0.8",
+        "n": 46,
+        "weight_n_k_over_N": 0.058748,
+        "mean_confidence": 0.737315,
+        "accuracy": 0.73913,
+        "confidence_min": 0.7,
+        "confidence_max": 0.7863,
+        "reliability_contribution": 0.0,
+        "resolution_contribution": 0.000282
+      },
+      {
+        "bucket": "0.8-0.9",
+        "n": 268,
+        "weight_n_k_over_N": 0.342273,
+        "mean_confidence": 0.869307,
+        "accuracy": 0.817164,
+        "confidence_min": 0.8057,
+        "confidence_max": 0.8999,
+        "reliability_contribution": 0.000931,
+        "resolution_contribution": 2.6e-05
+      },
+      {
+        "bucket": "0.9-1.0",
+        "n": 428,
+        "weight_n_k_over_N": 0.546616,
+        "mean_confidence": 0.922894,
+        "accuracy": 0.813084,
+        "confidence_min": 0.9001,
+        "confidence_max": 0.9458,
+        "reliability_contribution": 0.006591,
+        "resolution_contribution": 1.2e-05
+      }
+    ]
+  },
+  "generated_at": "2026-11-12T11:46:57+00:00",
   "formula_version": "rules-v1",
   "environment": {
     "python": "3.13.2",
     "system": "Darwin"
   },
-  "honest_interpretation": "rules-v1 is a heuristic confidence score, not a calibrated probability. Measured ECE 0.0905: materially miscalibrated on this distribution \u2014 treat scores as a ranking signal, not a probability; see docs/benchmarks/calibration.md."
+  "run_parameters": {
+    "seed": 42,
+    "n_companies": 250,
+    "scored_rows_sha256": "9bb3a9487345eaf31ff43aa788c6eeffdaa57c4c8ddf04c30a6b499dd51791ce",
+    "data": "synthetic world; truth is generated, not customer data"
+  },
+  "honest_interpretation": "rules-v1 is a heuristic confidence score, not a calibrated probability. Measured ECE 0.0905: materially miscalibrated on this distribution; the bucket table does not demonstrate useful ranking (AUC not computed). Do not read scores as probabilities; see docs/benchmarks/calibration.md."
 }

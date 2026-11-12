@@ -178,8 +178,14 @@ OAuth substitute and this build has **not** had an external security review.
 
 - All provider economics are simulated; benchmark ratios depend on the synthetic world's
   conflict/staleness rates (configurable — rerun with your own assumptions).
-- Confidence is measurably miscalibrated (ECE 0.091) — it ranks well but is not a probability;
-  the learned-model path is designed, not built.
+- Confidence is a heuristic score, not a calibrated probability: on the synthetic seed-42 run it
+  is measurably miscalibrated (ECE 0.091), and the published bucket table does not demonstrate
+  useful ranking (accuracy is not monotone in confidence; AUC was not computed, so individual-level
+  ranking is neither shown nor ruled out). Truth here is synthetic, not customer or production
+  data. An in-sample constant baseline (always predict the observed 0.808 accuracy, Brier 0.1549)
+  scores slightly better than rules-v1's raw Brier (0.1642); that baseline uses the outcomes it is
+  scored on, so it is a leakage reference, not a deployable comparator
+  ([details](docs/benchmarks/calibration.md)). The learned-model path is designed, not built.
 - Live Clay/HubSpot verification, Salesforce, and multi-region are not implemented.
 - Load-test numbers in `docs/benchmarks/` are from a development laptop.
 - Auth is JWT + seeded users (a documented OAuth substitute) — wire your IdP before exposing
