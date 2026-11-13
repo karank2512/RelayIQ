@@ -5,6 +5,11 @@ CSV batches) and your CRM (HubSpot-style), and decides — per record, per field
 spend enrichment credits at all, which provider should answer each field, whether the
 answers can be trusted, and whether they're good enough to write into the CRM.
 
+**Status:** the benchmark and calibration results below come from seeded synthetic data with
+simulated providers. The Clay contract and the HubSpot adapter are implemented but not
+verified against live accounts (see [integration status](#integration-status-no-fake-claims)
+and [limitations](#limitations-read-before-citing-this-project)).
+
 It does **not** replace Clay, HubSpot, Salesforce, or data providers. It is:
 
 1. a **pre-enrichment decision endpoint** (reject/skip/cache/enrich before any credit is spent),
@@ -220,3 +225,10 @@ which is exactly why the ledger exists.
 - `docs/interview-guide.md` — implementation-grounded Q&A
 - `docs/deployment.md`, `infrastructure/terraform/` — deployment paths (~$0–25/mo targets)
 - `docs/roadmap.md`, `CONTRIBUTING.md`, `SECURITY.md`
+
+## License
+
+[MIT](LICENSE), Copyright (c) 2026 Karan Kapur. The grant covers this repository's original
+source code and synthetic fixtures. It does not cover third-party dependencies, which keep
+their own licenses, or any material separately credited to someone else. Background on the
+choice: `docs/license-recommendation.md`.
