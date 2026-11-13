@@ -1,8 +1,19 @@
-# License recommendation
+# License recommendation and adoption
 
-**Recommendation: MIT.** No `LICENSE` file has been created — the choice (and the act of
-licensing) is deliberately left to the repository owner; until a license file exists, the
-code is all-rights-reserved by default.
+**Status: MIT adopted.** The repository owner chose MIT, and the [`LICENSE`](../LICENSE) file
+at the repository root (Copyright (c) 2026 Karan Kapur) is the governing text. This page is
+background on the choice. It is not a legal document and not legal advice.
+
+This page was first written as a recommendation, before the repository had a license. At that
+point no `LICENSE` file existed and the choice was deliberately left to the owner. The
+reasoning below is that original recommendation, kept for context; where it speaks of what
+the owner could do, read it as written before adoption.
+
+**Scope.** The MIT grant covers this repository's original source code and synthetic
+fixtures. It does not cover third-party dependencies, which keep their own licenses, or any
+material separately credited to someone else.
+
+The original recommendation was MIT, for the reasons that follow.
 
 ## Why MIT fits this project
 
@@ -57,14 +68,16 @@ at the cost of a longer license and NOTICE-file mechanics. Reasonable to choose 
 of MIT if patent posture matters; for a portfolio-stage project the practical difference
 is small. MIT is recommended for simplicity.
 
-## If the owner adopts MIT
+## What adoption changed
 
-1. Add a `LICENSE` file with the standard MIT text and the copyright line
-   (`Copyright (c) 2026 <owner>`).
-2. Add a `license = {text = "MIT"}` (or SPDX `license = "MIT"`) field to
-   `apps/api/pyproject.toml` and a `"license": "MIT"` field to
-   `apps/dashboard/package.json`.
-3. Note it in the README. No per-file headers are needed for MIT.
+The recommendation listed three follow-up steps. They were carried out as follows:
+
+1. A `LICENSE` file with the standard MIT text and the copyright line
+   `Copyright (c) 2026 Karan Kapur` was added at the repository root.
+2. `apps/api/pyproject.toml` declares `license = "MIT"` (the SPDX string form; the build
+   requirement moved to `setuptools>=77`, the first release that accepts it), and
+   `apps/dashboard/package.json` declares `"license": "MIT"`.
+3. The README has a License section. No per-file headers were added; MIT does not need them.
 
 One caveat regardless of license: the license covers the **code**. The honesty rules in
 the README (measured-vs-simulated labeling, no invented numbers) are conventions of this

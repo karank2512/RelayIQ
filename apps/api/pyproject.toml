@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]  # 77 is the first release that accepts the SPDX license string below
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,7 @@ name = "relayiq"
 version = "0.1.0"
 description = "RelayIQ — enrichment control plane: field-level routing, caching, reconciliation, confidence, cost ledger"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30,<1",
