@@ -13,7 +13,7 @@ Product-path rules (stricter than the offline SnapshotProvider):
   account's own root domain; GLEIF records carry no website, so GLEIF always abstains here.
 - Wikidata answers only when a record's official website host equals the account's domain exactly.
 - root_domain is never offered (the account's domain is an input); values that would not fit the account
-  columns are dropped, never truncated.
+  columns (too long, or containing control characters) are dropped, never truncated.
 - No account domain means no answer.
 - Leakage guard: a snapshot file may contain only the source sections {"sec", "gleif", "wikidata"};
   anything else (labels, answer keys, truth tables) is refused at load time, and so is any path outside
@@ -39,7 +39,6 @@ MAX_VALUE_CHARS = 120  # Account.hq_city / hq_state column width
 # The only ProviderConfig.config keys a snapshot row may carry. The snapshot root comes from the
 # environment only, never from config (admins can edit config through the API).
 CONFIG_KEYS = frozenset({"snapshot_file", "as_of", "display_name"})
-_REGISTRY_KEYS = frozenset({"capabilities", "field_costs", "provider_key"})  # added by the registry
 
 
 class SnapshotConfigError(ValueError):
@@ -99,6 +98,13 @@ def _parse_snapshot(path: str, mtime_ns: int, size: int) -> dict:
     if extra:  # count only: key names come from the file and are not echoed into logs
         raise SnapshotConfigError(f"snapshot file has {len(extra)} section(s) other than {list(SOURCES)}")
     return doc
+
+
+def _usable_value(value) -> bool:
+    """Fits the account columns: 1 to MAX_VALUE_CHARS characters and no control characters (NUL, newlines,
+    tabs, ...). Anything else is dropped, never repaired."""
+    text = str(value)
+    return 0 < len(text) <= MAX_VALUE_CHARS and not any(ord(c) < 32 or ord(c) == 127 for c in text)
 
 
 class SnapshotReplayAdapter(ProviderAdapter):
@@ -186,11 +192,7 @@ class SnapshotReplayAdapter(ProviderAdapter):
         binding = inner.binding_log.get(name)
         result.provider_key = self.key
         # Values must fit the account columns they are written to; never truncate (that would invent a value).
-        result.fields = {
-            f: v
-            for f, v in result.fields.items()
-            if len(str(v.value)) <= MAX_VALUE_CHARS and "\x00" not in str(v.value)
-        }
+        result.fields = {f: v for f, v in result.fields.items() if _usable_value(v.value)}
         if result.ok and not result.fields:
             result.outcome = ProviderOutcome.PERM_FAIL
             result.error = "no usable value"
@@ -210,13 +212,24 @@ class SnapshotReplayAdapter(ProviderAdapter):
 
 
 def _factory(source: str):
-    def make(**overrides) -> SnapshotReplayAdapter:
-        unknown = set(overrides) - CONFIG_KEYS - _REGISTRY_KEYS
-        if unknown:  # e.g. snapshot_root or identity facts smuggled in through provider config
+    def make(
+        config: dict,
+        *,
+        provider_key: str,
+        capabilities: dict[str, set[str]] | None = None,
+        field_costs: dict[str, float] | None = None,
+    ) -> SnapshotReplayAdapter:
+        """`config` is the row's (admin-editable) config; everything else comes from the registry."""
+        if not isinstance(config, dict):
+            raise SnapshotConfigError("config must be an object")
+        unknown = set(config) - CONFIG_KEYS
+        if unknown:  # e.g. a root, capabilities, a key or identity facts supplied through provider config
             raise SnapshotConfigError(
                 f"config has {len(unknown)} unsupported key(s); allowed: {sorted(CONFIG_KEYS)}"
             )
-        return SnapshotReplayAdapter(source, **overrides)
+        return SnapshotReplayAdapter(
+            source, provider_key=provider_key, capabilities=capabilities, field_costs=field_costs, **config
+        )
 
     make.__name__ = f"make_snapshot_{source}"
     return make

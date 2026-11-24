@@ -175,17 +175,27 @@ class ProviderRegistry:
                     select(ProviderCapability).where(ProviderCapability.provider_id == cfg.id)
                 ).scalars().all()
                 overrides = dict(cfg.config or {})
+                field_costs: dict[str, float] | None = None
+                capabilities: dict[str, set[str]] | None = None
                 if caps:
                     field_costs = {c.field_name: float(c.cost_credits) for c in caps}
-                    capabilities: dict[str, set[str]] = {}
+                    capabilities = {}
                     for c in caps:
                         capabilities.setdefault(c.entity_type, set()).add(c.field_name)
                     overrides.setdefault("field_costs", field_costs)
                     overrides.setdefault("capabilities", capabilities)
-                if cfg.adapter in _KEYED_FACTORIES:
-                    overrides["provider_key"] = cfg.key
                 try:
-                    adapter = factory(**overrides)
+                    if cfg.adapter in _KEYED_FACTORIES:
+                        # Admin-editable config and registry-owned values travel separately, so config can
+                        # never supply capabilities, costs or the key.
+                        adapter = _KEYED_FACTORIES[cfg.adapter](
+                            dict(cfg.config or {}),
+                            provider_key=cfg.key,
+                            capabilities=capabilities,
+                            field_costs=field_costs,
+                        )
+                    else:
+                        adapter = factory(**overrides)
                 except Exception as exc:  # noqa: BLE001 - one bad row must not disable every provider
                     # Key, adapter and error type only; SnapshotConfigError messages are written to carry no
                     # file contents or paths. Other exceptions are not echoed (config may name private files).

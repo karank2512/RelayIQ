@@ -31,7 +31,8 @@ top-level sections are allowed. `as_of` is an ISO 8601 date.
   account's own root domain. A name match alone never answers. GLEIF records carry no website, so GLEIF
   always abstains in the product path. Wikidata answers only when a record's official website host equals
   the account's domain exactly. No account domain means no answer. Values that would not fit the account
-  columns (over 120 characters, or containing a NUL byte) are dropped, never truncated.
+  columns (over 120 characters, or containing control characters such as NUL or newlines) are dropped,
+  never truncated.
 - **No identity facts in the product path:** the identity-facts sidecar (`identity_facts.py`) holds
   per-tenant assertions, and there is no per-tenant store for them yet, so the registry adapters accept none.
 - **Per call, nothing shared:** every call builds a fresh provider from that call's identifiers. No binding
@@ -44,8 +45,10 @@ top-level sections are allowed. `as_of` is an ISO 8601 date.
 A row is skipped, and the rest of the registry still loads, when:
 
 - `RELAYIQ_SNAPSHOT_ROOT` is unset (the feature is off). The root is read from the environment only;
-  provider config cannot set or change it, and any config key other than `snapshot_file`, `as_of` and
-  `display_name` is refused (so identity facts cannot be supplied through config either);
+  provider config cannot set or change it. A row's config may hold only `snapshot_file`, `as_of` and
+  `display_name`; any other key is refused, including capabilities, costs, a provider key, a root or
+  identity facts. Capabilities and costs come only from `ProviderCapability` rows, and the key from the
+  row itself;
 - `snapshot_file` is absolute, contains `..`, is not a valid name, resolves outside the root (symlinks
   included), is missing, or is larger than 50 MB;
 - the file is not a JSON object, lacks the source's section, or has any section other than

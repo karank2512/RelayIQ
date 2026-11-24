@@ -417,6 +417,36 @@ class TestRegistryWiring:
         assert reg.all() == {}
         assert "private_section_name" not in json.dumps(logs)
 
+    def test_config_cannot_widen_capabilities_change_costs_or_rename_the_key(self, root, monkeypatch):
+        monkeypatch.setenv(SA.SNAPSHOT_ROOT_ENV, root)
+        monkeypatch.setenv("RELAYIQ_SHARED_BREAKER", "0")
+        base = {"snapshot_file": "snap.json", "as_of": "2026-11-20"}
+        rows = [
+            _cfg(
+                "p1", "widen", "snapshot.sec", dict(base, capabilities={"account": ["hq_city", "hq_state"]})
+            ),
+            _cfg("p2", "rename", "snapshot.sec", dict(base, provider_key="alpha")),
+            _cfg("p3", "costs", "snapshot.sec", dict(base, field_costs={"hq_city": 5.0})),
+            _cfg("p4", "clean", "snapshot.sec", dict(base)),
+        ]
+        caps = [
+            ProviderCapability(provider_id=pid, entity_type="account", field_name="hq_city", cost_credits=1)
+            for pid in ("p1", "p2", "p3", "p4")
+        ]
+        reg = registry_mod.ProviderRegistry()
+        with capture_logs() as logs:
+            reg.load(_Session(rows, caps))
+        assert sorted(reg.all()) == ["clean"]
+        clean = reg.get("clean")
+        assert clean is not None and clean.key == "clean"
+        assert clean.capabilities() == {"account": {"hq_city"}}
+        failed = {e["provider"]: e["error"] for e in logs if e.get("event") == "provider_load_failed"}
+        assert failed == {
+            "widen": "SnapshotConfigError",
+            "rename": "SnapshotConfigError",
+            "costs": "SnapshotConfigError",
+        }
+
     def test_without_a_root_snapshot_rows_are_skipped(self, monkeypatch):
         monkeypatch.delenv(SA.SNAPSHOT_ROOT_ENV, raising=False)
         monkeypatch.setenv("RELAYIQ_SHARED_BREAKER", "0")
@@ -457,7 +487,7 @@ class TestOutputSafety:
                             "id": "Q7",
                             "label": "Acme",
                             "desc": "software company",
-                            "website": "https://unrelated-site.github.io",
+                            "website": "https://unrelated-site.hosting.example",
                             "hq_city": "Wrongville",
                             "hq_state": "TX",
                         }
@@ -469,10 +499,12 @@ class TestOutputSafety:
         a = SA.SnapshotReplayAdapter(
             "wikidata", snapshot_file="w.json", as_of="2026-11-20", snapshot_root=str(tmp_path)
         )
-        r = a.enrich("account", {"company_name": "Acme", "root_domain": "acme.github.io"}, ["hq_city"])
+        r = a.enrich("account", {"company_name": "Acme", "root_domain": "acme.hosting.example"}, ["hq_city"])
         assert r.outcome == ProviderOutcome.PERM_FAIL and r.fields == {}
         ok = a.enrich(
-            "account", {"company_name": "Acme", "root_domain": "www.unrelated-site.github.io"}, ["hq_city"]
+            "account",
+            {"company_name": "Acme", "root_domain": "www.unrelated-site.hosting.example"},
+            ["hq_city"],
         )
         assert ok.fields["hq_city"].value == "Wrongville"  # exact host (www. ignored) still binds
 
@@ -492,6 +524,20 @@ class TestOutputSafety:
         r = a.enrich("account", ACME, ["hq_city", "hq_state"])
         assert r.ok and set(r.fields) == {"hq_state"}
 
+    def test_value_length_boundary_and_control_characters(self, tmp_path):
+        def run(city):
+            chosen = dict(SNAP["sec"]["Acme"]["chosen"], hq_city=city)
+            f = tmp_path / f"b{len(city)}{ord(city[-1])}.json"
+            f.write_text(json.dumps({"sec": {"Acme": {"chosen": chosen}}}))
+            a = SA.SnapshotReplayAdapter(
+                "sec", snapshot_file=f.name, as_of="2026-11-20", snapshot_root=str(tmp_path)
+            )
+            return a.enrich("account", ACME, ["hq_city"])
+
+        assert run("y" * 120).fields["hq_city"].value == "y" * 120
+        for bad in ("Some\nwhere", "Some\twhere", "Some\x7fwhere"):
+            assert run(bad).error == "no usable value", repr(bad)
+
     def test_absent_company_is_no_matching_record(self, root):
         for source in ("sec", "gleif", "wikidata"):
             r = make(source, root).enrich(
@@ -504,6 +550,9 @@ class TestOutputSafety:
         assert a.enrich("account", ACME, None).error == "no supported fields requested"
         r = a.enrich("account", {"company_name": 123, "root_domain": ["x"]}, ["hq_city"])
         assert r.outcome == ProviderOutcome.PERM_FAIL
+        for ids, fields in ((None, ["hq_city"]), (ACME, 5), (ACME, [["hq_city"]])):
+            r = a.enrich("account", ids, fields)
+            assert r.outcome == ProviderOutcome.PERM_FAIL and r.error.startswith("snapshot replay failed")
 
     def test_raw_payload_carries_only_state_reason_basis(self, root):
         r = make("sec", root).enrich("account", ACME, ["hq_city"])
