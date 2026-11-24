@@ -74,7 +74,7 @@ def execute_with_retries(
         retry_count=max(0, attempts - 1),
         latency_ms=result.latency_ms,
         cost_credits=result.cost_credits,
-        error_type=result.error,
+        error_type=_error_type(result.error),
         trace_id=trace_id,
     )
     session.add(req)
@@ -93,6 +93,16 @@ def execute_with_retries(
     PROVIDER_LATENCY.labels(provider=adapter.key).observe(result.latency_ms)
     _record_health(session, adapter.key, result)
     return result, req
+
+
+ERROR_TYPE_MAX = 80  # ProviderRequest.error_type column width
+
+
+def _error_type(error: str | None) -> str | None:
+    """A provider's error text, bounded to the column width so a long message can never fail the job."""
+    if error is None:
+        return None
+    return error if len(error) <= ERROR_TYPE_MAX else error[: ERROR_TYPE_MAX - 3] + "..."
 
 
 def _window_start(now: datetime) -> datetime:

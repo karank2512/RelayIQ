@@ -166,6 +166,7 @@ make load-test         # locust, 25 users / 60s — local-machine numbers only
 | Clay | **Contract implemented, not live-tested** — sidecar HTTP contract matches Clay's generic HTTP-API column; see `docs/architecture/clay-integration.md` for unverified assumptions |
 | HubSpot | **Adapter implemented + fixture-tested** (v3 objects API, rate-limit/retry handling, dry-run); **live sync not verified** — set `HUBSPOT_ACCESS_TOKEN` and a `hubspot` CRM connection to try it |
 | CRM simulator | **Fully working** — inspectable via API/UI, used by the e2e suite |
+| SEC EDGAR / GLEIF / Wikidata snapshot replay | **Wired, off by default, synthetic-tested only**: operator-enabled `snapshot.*` provider rows answer from a local JSON snapshot; registry sources bind only on the account's exact website host (GLEIF abstains), no live calls and no real snapshot ships; see `docs/architecture/snapshot-replay-providers.md` |
 | Salesforce | **Designed only** — interface parallel to HubSpot, see roadmap |
 
 ## Security
