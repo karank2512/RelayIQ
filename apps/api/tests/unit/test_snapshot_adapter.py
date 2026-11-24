@@ -14,6 +14,7 @@ from relayiq.enums import ProviderOutcome
 from relayiq.models import ProviderCapability, ProviderConfig
 from relayiq.providers import registry as registry_mod
 from relayiq.providers import snapshot_adapter as SA
+from relayiq.services import provider_exec
 
 SNAP = {
     "sec": {
@@ -182,7 +183,38 @@ class TestIsolation:
         )
         r = a.enrich("account", ACME, ["hq_city"])
         assert r.outcome == ProviderOutcome.PERM_FAIL
-        assert r.fields == {} and "AttributeError" in (r.error or "")
+        assert r.fields == {} and r.error == "snapshot replay failed"
+
+    def test_errors_are_short_and_stable(self, root):
+        # errors are stored in a bounded column; the detailed reason stays in raw_payload
+        cases = [
+            ("sec", {"company_name": "Globex", "root_domain": "globex.example"}, ["hq_city"]),
+            ("gleif", ACME, ["hq_city"]),
+            ("wikidata", dict(ACME, root_domain="other.example"), ["hq_city"]),
+            ("sec", {"company_name": "Nobody", "root_domain": "nobody.example"}, ["hq_city"]),
+            ("sec", {"company_name": "Acme"}, ["hq_city"]),
+            ("sec", ACME, ["employee_count"]),
+        ]
+        errors = set()
+        for source, ids, fields in cases:
+            r = make(source, root).enrich("account", ids, fields)
+            assert r.outcome == ProviderOutcome.PERM_FAIL
+            assert r.error and len(r.error) <= provider_exec.ERROR_TYPE_MAX, r.error
+            errors.add(r.error)
+        assert "identity not bound; needs review" in errors
+        r = make("sec", root).enrich(
+            "account", {"company_name": "Globex", "root_domain": "globex.example"}, ["hq_city"]
+        )
+        assert "differs" in r.raw_payload["identity_binding"]["reason"]
+
+    def test_provider_error_text_is_bounded_before_it_is_stored(self):
+        assert provider_exec._error_type(None) is None
+        assert provider_exec._error_type("short") == "short"
+        long = "x" * 500
+        bounded = provider_exec._error_type(long)
+        assert (
+            bounded is not None and len(bounded) == provider_exec.ERROR_TYPE_MAX and bounded.endswith("...")
+        )
 
 
 # ---------------------------------------------------------------- config refusals and leakage guard

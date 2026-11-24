@@ -149,6 +149,14 @@ class SnapshotReplayAdapter(ProviderAdapter):
                 error=f"snapshot replay failed ({type(exc).__name__})",
             )
         result.provider_key = self.key
+        if not result.ok:
+            # Short, stable error (stored in a bounded column); the detailed reason stays in raw_payload.
+            if binding is not None and binding.get("state") == "abstain":
+                result.error = "identity not bound; needs review"
+            elif result.error and result.error.startswith("no matching record"):
+                result.error = "no matching record"
+            else:
+                result.error = "snapshot replay failed"
         if binding is not None:
             result.raw_payload = {
                 "identity_binding": {k: binding[k] for k in ("state", "reason", "basis") if k in binding}
