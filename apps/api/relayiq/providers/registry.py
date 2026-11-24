@@ -11,13 +11,28 @@ import time
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from relayiq.logging_setup import get_logger
 from relayiq.models import ProviderCapability, ProviderConfig
 from relayiq.providers.base import ProviderAdapter
 from relayiq.providers.simulators import make_alpha, make_beta
+from relayiq.providers.snapshot_adapter import (
+    SnapshotConfigError,
+    make_snapshot_gleif,
+    make_snapshot_sec,
+    make_snapshot_wikidata,
+)
+
+log = get_logger("providers.registry")
 
 _FACTORIES = {
     "simulator.alpha": make_alpha,
     "simulator.beta": make_beta,
+}
+# Factories that take the registry row's key (their adapter key must equal it: breakers are keyed on it).
+_KEYED_FACTORIES = {
+    "snapshot.sec": make_snapshot_sec,
+    "snapshot.gleif": make_snapshot_gleif,
+    "snapshot.wikidata": make_snapshot_wikidata,
 }
 
 
@@ -153,7 +168,7 @@ class ProviderRegistry:
             self._adapters.clear()
             self._configs.clear()
             for cfg in rows:
-                factory = _FACTORIES.get(cfg.adapter)
+                factory = _FACTORIES.get(cfg.adapter) or _KEYED_FACTORIES.get(cfg.adapter)
                 if factory is None:
                     continue
                 caps = session.execute(
@@ -167,7 +182,22 @@ class ProviderRegistry:
                         capabilities.setdefault(c.entity_type, set()).add(c.field_name)
                     overrides.setdefault("field_costs", field_costs)
                     overrides.setdefault("capabilities", capabilities)
-                self._adapters[cfg.key] = factory(**overrides)
+                if cfg.adapter in _KEYED_FACTORIES:
+                    overrides["provider_key"] = cfg.key
+                try:
+                    adapter = factory(**overrides)
+                except Exception as exc:  # noqa: BLE001 — one bad row must not disable every provider
+                    # Key, adapter and error type only; SnapshotConfigError messages are written to carry no
+                    # file contents or paths. Other exceptions are not echoed (config may name private files).
+                    log.warning(
+                        "provider_load_failed",
+                        provider=cfg.key,
+                        adapter=cfg.adapter,
+                        error=type(exc).__name__,
+                        reason=str(exc) if isinstance(exc, SnapshotConfigError) else None,
+                    )
+                    continue
+                self._adapters[cfg.key] = adapter
                 self._configs[cfg.key] = cfg
                 self._breakers.setdefault(cfg.key, _make_breaker(cfg.key))
 

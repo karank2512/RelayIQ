@@ -806,6 +806,29 @@ class Pins(Base):
         for key in ("sec", "gleif"):
             self.assertIsNone(self.run1(key, "Acme", sp)[0], key)
 
+    def test_sec_jurisdiction_alone_never_binds_a_different_legal_name(self):
+        # no website on the registrant: the asserted legal name must match as well as the jurisdiction
+        sp = self.snap(sec={"Acme": sec_rec("ACME INC.", "DE", None)})
+        facts = self.facts("Acme", legal_name=("Globex Inc.",) + V, legal_jurisdiction=("US-STATE:DE",) + V)
+        val, b, _ = self.run1("sec", "Acme", sp, facts)
+        self.assertIsNone(val)
+        self.assertIn("does not match the registrant", b["reason"])
+
+    def test_provider_refuses_hand_built_facts_not_asserted_verified(self):
+        # only "verified" fields may reach the provider; a hand-built "crm" field is refused outright
+        sp = self.snap(gleif={"Acme": {"candidates": [cand("L1", "ACME, INC.", "US")], "chosen": None}})
+        crm = {
+            "Acme": {
+                "fields": {
+                    "legal_name": dict(value="ACME, INC.", source="crm", as_of="2026-11-20", ref="r1")
+                },
+                "_unverified": [],
+                "synthetic": False,
+            }
+        }
+        with self.assertRaises(ValueError):
+            SnapshotProvider("gleif", "gleif", sp, AS_OF, identity_facts=crm)
+
 
 if __name__ == "__main__":
     unittest.main()

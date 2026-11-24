@@ -43,17 +43,22 @@ class SnapshotProvider(ProviderAdapter):
         self,
         key: str,
         display: str,
-        snapshot_path: str,
+        snapshot_path: str | None,
         as_of: str,
         *,
         name_guard: bool = False,
         entity_check: bool = False,
         input_domains: dict[str, str] | None = None,
         identity_facts: dict[str, dict] | None = None,
+        records: dict | None = None,
     ):
+        """`records` (this source's {company name: record} mapping, already loaded) replaces reading
+        `snapshot_path`; exactly one of the two must be given."""
+        if (snapshot_path is None) == (records is None):
+            raise ValueError("give exactly one of snapshot_path or records")
         self.key = key
         self.display_name = display
-        self._snap = json.loads(Path(snapshot_path).read_text())[key]
+        self._snap = records if records is not None else json.loads(Path(str(snapshot_path)).read_text())[key]
         self._as_of = datetime.fromisoformat(as_of).replace(tzinfo=UTC)
         self._guard = name_guard
         self._entity = entity_check
