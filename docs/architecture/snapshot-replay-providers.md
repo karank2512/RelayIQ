@@ -33,31 +33,29 @@ sections are allowed.
   outcome (state, reason, basis) is returned in the result's `raw_payload`.
 - **Never raises:** unusable input or records give a `perm_fail` result, so routing falls back.
 
-## Load-time guards (leakage and safety)
+## Load-time guards
 
 A row is skipped, and the rest of the registry still loads, when:
 
-- `RELAYIQ_SNAPSHOT_ROOT` is unset (the feature is off);
-- `snapshot_file` is absolute, contains `..`, resolves outside the root (symlinks included), is missing or
-  is larger than 50 MB;
-- the file is not a JSON object, lacks the source's section, or has **any section other than
-  `sec` / `gleif` / `wikidata`** — so label files, answer keys or truth tables can never be loaded as a
+- `RELAYIQ_SNAPSHOT_ROOT` is unset (the feature is off). The root is read from the environment only;
+  provider config cannot set or change it, and any config key other than `snapshot_file`, `as_of` and
+  `display_name` is refused (so identity facts cannot be supplied through config either);
+- `snapshot_file` is absolute, contains `..`, is not a valid name, resolves outside the root (symlinks
+  included), is missing, or is larger than 50 MB;
+- the file is not a JSON object, lacks the source's section, or has any section other than
+  `sec` / `gleif` / `wikidata`, so a file holding anything else (for example labels) is never loaded as a
   provider snapshot;
-- `as_of` is not an ISO date, or the config carries unknown keys (for example identity facts).
+- `as_of` is not an ISO date.
 
-The registry logs `provider_load_failed` with the provider key, adapter and error type. It logs no file
-contents and no file names.
+The registry logs `provider_load_failed` with the provider key, adapter, error type and, for configuration
+errors, a fixed reason. It logs no file contents, file names or section names. A parsed snapshot is cached
+by path, modification time and size, so it is re-read only when the file changes.
 
-## Holdout readiness
+## Scope of the isolation
 
-For an evaluation on held-out companies, the protections in the product path are:
-
-- the snapshot file can contain only source records (the section allow-list above), never labels;
-- nothing is learned or cached across calls, so one company's answers cannot influence another's;
-- a name match never binds a registry record, so a similar-name company cannot leak in.
-
-Out of scope here (owner decisions): collecting a new snapshot, choosing holdout companies, locking an
-answer key, and the evaluation run itself.
+The adapter itself keeps no state between calls: each call builds a fresh provider from that call's
+identifiers. The rest of the enrichment pipeline works as for any provider: accepted values go through the
+field cache, the canonical store, reconciliation and routing history as usual.
 
 ## Limits
 

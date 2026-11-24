@@ -186,7 +186,7 @@ class ProviderRegistry:
                     overrides["provider_key"] = cfg.key
                 try:
                     adapter = factory(**overrides)
-                except Exception as exc:  # noqa: BLE001 — one bad row must not disable every provider
+                except Exception as exc:  # noqa: BLE001 - one bad row must not disable every provider
                     # Key, adapter and error type only; SnapshotConfigError messages are written to carry no
                     # file contents or paths. Other exceptions are not echoed (config may name private files).
                     log.warning(

@@ -150,6 +150,11 @@ class TestProductPath:
         r = a.enrich("account", ACME, ["hq_city", "hq_state"])
         assert set(r.fields) == {"hq_city"}
 
+    def test_capability_rows_for_other_entity_types_grant_no_account_fields(self, root):
+        a = make("sec", root, capabilities={"contact": {"job_title"}})
+        assert a.capabilities() == {"account": set()}
+        assert a.enrich("account", ACME, ["hq_city"]).error == "no supported fields requested"
+
     def test_replay_is_free(self, root):
         a = make("sec", root, field_costs={"hq_city": 9.0})
         assert a.field_cost("account", "hq_city") == 0.0
@@ -251,10 +256,37 @@ class TestConfigGuards:
     @pytest.mark.parametrize("extra", ["labels", "answer_key", "truth"])
     def test_files_with_non_source_sections_are_refused(self, tmp_path, extra):
         (tmp_path / "leaky.json").write_text(json.dumps(dict(SNAP, **{extra: {"Acme": {"hq_city": "X"}}})))
-        with pytest.raises(SA.SnapshotConfigError, match="sections other than"):
+        with pytest.raises(SA.SnapshotConfigError, match=r"section\(s\) other than"):
             SA.SnapshotReplayAdapter(
                 "sec", snapshot_file="leaky.json", as_of="2026-11-20", snapshot_root=str(tmp_path)
             )
+
+    def test_invalid_file_name_is_a_config_error(self, root):
+        with pytest.raises(SA.SnapshotConfigError, match="not a valid file name"):
+            SA.SnapshotReplayAdapter(
+                "sec", snapshot_file="snap\x00.json", as_of="2026-11-20", snapshot_root=root
+            )
+
+    def test_parsed_snapshot_is_cached_until_the_file_changes(self, tmp_path):
+        f = tmp_path / "c.json"
+        f.write_text(json.dumps(SNAP))
+        SA._parse_snapshot.cache_clear()
+        a = SA.SnapshotReplayAdapter(
+            "sec", snapshot_file="c.json", as_of="2026-11-20", snapshot_root=str(tmp_path)
+        )
+        b = SA.SnapshotReplayAdapter(
+            "gleif", snapshot_file="c.json", as_of="2026-11-20", snapshot_root=str(tmp_path)
+        )
+        assert SA._parse_snapshot.cache_info().misses == 1 and SA._parse_snapshot.cache_info().hits == 1
+        changed = dict(SNAP, sec={"Acme": dict(SNAP["sec"]["Acme"])})
+        changed["sec"]["Acme"]["chosen"] = dict(SNAP["sec"]["Acme"]["chosen"], hq_city="Newtown")
+        f.write_text(json.dumps(changed) + "\n")  # size changes, so the file is re-parsed
+        c = SA.SnapshotReplayAdapter(
+            "sec", snapshot_file="c.json", as_of="2026-11-20", snapshot_root=str(tmp_path)
+        )
+        assert a.enrich("account", ACME, ["hq_city"]).fields["hq_city"].value == "Somewhere"
+        assert c.enrich("account", ACME, ["hq_city"]).fields["hq_city"].value == "Newtown"
+        assert b.capabilities() == {"account": {"hq_city", "hq_state"}}
 
     def test_bad_json_missing_section_bad_date_unknown_source_and_size(self, root, tmp_path, monkeypatch):
         (tmp_path / "broken.json").write_text("{not json")
@@ -345,6 +377,45 @@ class TestRegistryWiring:
         assert failed["replay_bad"]["error"] == "SnapshotConfigError"
         assert "leaky.json" not in json.dumps(failed)  # file names are not logged
         assert failed["replay_typo"]["error"] == "TypeError" and failed["replay_typo"]["reason"] is None
+
+    def test_config_cannot_set_the_root_or_smuggle_other_keys(self, root, tmp_path, monkeypatch):
+        # admins can PATCH provider config through the API: it must not choose which directory is read
+        monkeypatch.setenv("RELAYIQ_SHARED_BREAKER", "0")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "other.json").write_text(json.dumps(SNAP))
+        base = {"snapshot_file": "other.json", "as_of": "2026-11-20"}
+        rows = [
+            _cfg("p1", "via_root", "snapshot.sec", dict(base, snapshot_root=str(elsewhere))),
+            _cfg("p2", "via_facts", "snapshot.sec", dict(base, identity_facts={"Acme": {}})),
+        ]
+        for env_root in (None, root):  # feature off, and feature on with a different root
+            if env_root is None:
+                monkeypatch.delenv(SA.SNAPSHOT_ROOT_ENV, raising=False)
+            else:
+                monkeypatch.setenv(SA.SNAPSHOT_ROOT_ENV, env_root)
+            reg = registry_mod.ProviderRegistry()
+            with capture_logs() as logs:
+                reg.load(_Session(rows, []))
+            assert reg.all() == {}
+            failed = {e["provider"]: e for e in logs if e.get("event") == "provider_load_failed"}
+            assert set(failed) == {"via_root", "via_facts"}
+            assert all(e["error"] == "SnapshotConfigError" for e in failed.values())
+            assert "elsewhere" not in json.dumps(failed)
+
+    def test_extra_section_names_are_not_logged(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("RELAYIQ_SHARED_BREAKER", "0")
+        monkeypatch.setenv(SA.SNAPSHOT_ROOT_ENV, str(tmp_path))
+        (tmp_path / "s.json").write_text(json.dumps(dict(SNAP, private_section_name={})))
+        reg = registry_mod.ProviderRegistry()
+        with capture_logs() as logs:
+            reg.load(
+                _Session(
+                    [_cfg("p1", "r", "snapshot.sec", {"snapshot_file": "s.json", "as_of": "2026-11-20"})], []
+                )
+            )
+        assert reg.all() == {}
+        assert "private_section_name" not in json.dumps(logs)
 
     def test_without_a_root_snapshot_rows_are_skipped(self, monkeypatch):
         monkeypatch.delenv(SA.SNAPSHOT_ROOT_ENV, raising=False)

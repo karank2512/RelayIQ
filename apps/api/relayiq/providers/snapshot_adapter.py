@@ -1,8 +1,9 @@
 """Registry-facing adapter for the public-source snapshot replay providers (SEC EDGAR, GLEIF, Wikidata).
 
 An operator enables one by adding a ProviderConfig row with adapter "snapshot.sec", "snapshot.gleif" or
-"snapshot.wikidata" and config {"snapshot_file": "<name>.json", "as_of": "YYYY-MM-DD"}. It is off unless
-RELAYIQ_SNAPSHOT_ROOT names a directory; the file is resolved inside that directory only.
+"snapshot.wikidata" and config {"snapshot_file": "<name>.json", "as_of": "YYYY-MM-DD"} (optionally
+"display_name"; any other config key is refused). It is off unless RELAYIQ_SNAPSHOT_ROOT names a directory;
+the root comes from the environment only, never from provider config, and the file is resolved inside it.
 
 Product-path rules (stricter than the offline SnapshotProvider):
 - Per call, nothing shared: every call builds a fresh SnapshotProvider from this call's identifiers, so no
@@ -22,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 
 from relayiq.enums import EntityType, ProviderOutcome
@@ -31,6 +33,10 @@ from relayiq.providers.public_sources import ACCOUNT_FIELDS_BY_SOURCE, SnapshotP
 SNAPSHOT_ROOT_ENV = "RELAYIQ_SNAPSHOT_ROOT"
 SOURCES = ("sec", "gleif", "wikidata")
 MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024
+# The only ProviderConfig.config keys a snapshot row may carry. The snapshot root comes from the
+# environment only, never from config (admins can edit config through the API).
+CONFIG_KEYS = frozenset({"snapshot_file", "as_of", "display_name"})
+_REGISTRY_KEYS = frozenset({"capabilities", "field_costs", "provider_key"})  # added by the registry
 
 
 class SnapshotConfigError(ValueError):
@@ -45,8 +51,11 @@ def _resolve_snapshot(snapshot_file: str, root: str | None) -> Path:
     rel = Path(snapshot_file)
     if rel.is_absolute() or ".." in rel.parts:
         raise SnapshotConfigError("config.snapshot_file must be a relative name inside the snapshot root")
-    base = Path(root).resolve()
-    path = (base / rel).resolve()
+    try:
+        base = Path(root).resolve()
+        path = (base / rel).resolve()
+    except (OSError, ValueError):  # e.g. a NUL byte in the name
+        raise SnapshotConfigError("config.snapshot_file is not a valid file name") from None
     if base not in path.parents:
         raise SnapshotConfigError("config.snapshot_file resolves outside the snapshot root")
     if not path.is_file():
@@ -61,19 +70,32 @@ def load_snapshot_records(source: str, snapshot_file: str, root: str | None) -> 
     if source not in SOURCES:
         raise SnapshotConfigError(f"unknown snapshot source {source!r}")
     path = _resolve_snapshot(snapshot_file, root)
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise SnapshotConfigError(f"snapshot file is not readable JSON ({type(exc).__name__})") from None
-    if not isinstance(doc, dict):
-        raise SnapshotConfigError("snapshot file must be a JSON object")
-    extra = sorted(set(doc) - set(SOURCES))
-    if extra:
-        raise SnapshotConfigError(f"snapshot file has sections other than {list(SOURCES)}: {extra}")
+    st = path.stat()
+    doc = _parse_snapshot(str(path), st.st_mtime_ns, st.st_size)
     records = doc.get(source)
     if not isinstance(records, dict):
         raise SnapshotConfigError(f"snapshot file has no {source!r} section")
     return records
+
+
+@lru_cache(maxsize=8)
+def _parse_snapshot(path: str, mtime_ns: int, size: int) -> dict:
+    """Parsed, validated snapshot document. Cached by (path, mtime, size): the registry rebuilds adapters
+    on every job, and the file is only re-parsed when it changes. Records are never mutated."""
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read(MAX_SNAPSHOT_BYTES + 1)
+        if len(raw) > MAX_SNAPSHOT_BYTES:
+            raise SnapshotConfigError("snapshot file is larger than the allowed maximum")
+        doc = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SnapshotConfigError(f"snapshot file is not readable JSON ({type(exc).__name__})") from None
+    if not isinstance(doc, dict):
+        raise SnapshotConfigError("snapshot file must be a JSON object")
+    extra = set(doc) - set(SOURCES)
+    if extra:  # count only: key names come from the file and are not echoed into logs
+        raise SnapshotConfigError(f"snapshot file has {len(extra)} section(s) other than {list(SOURCES)}")
+    return doc
 
 
 class SnapshotReplayAdapter(ProviderAdapter):
@@ -102,7 +124,11 @@ class SnapshotReplayAdapter(ProviderAdapter):
         self.key = provider_key or source
         self.display_name = display_name or f"Snapshot replay ({source})"
         supported = set(ACCOUNT_FIELDS_BY_SOURCE[source])
-        allowed = set((capabilities or {}).get(EntityType.ACCOUNT.value, supported)) & supported
+        allowed = (
+            supported
+            if capabilities is None
+            else set(capabilities.get(EntityType.ACCOUNT.value, ())) & supported
+        )
         self._fields = allowed
 
     def capabilities(self) -> dict[str, set[str]]:
@@ -116,8 +142,8 @@ class SnapshotReplayAdapter(ProviderAdapter):
             return EnrichmentCallResult(
                 self.key, entity_type, ProviderOutcome.PERM_FAIL, error="unsupported entity type"
             )
-        name = (identifiers.get("company_name") or identifiers.get("name") or "").strip()
-        domain = (identifiers.get("root_domain") or identifiers.get("website") or "").strip()
+        name = str(identifiers.get("company_name") or identifiers.get("name") or "").strip()
+        domain = str(identifiers.get("root_domain") or identifiers.get("website") or "").strip()
         wanted = [f for f in fields if f in self._fields]
         if not name or not domain:
             return EnrichmentCallResult(
@@ -141,7 +167,7 @@ class SnapshotReplayAdapter(ProviderAdapter):
             )
             result = inner.enrich(entity_type, {"company_name": name}, wanted, timeout_ms=timeout_ms)
             binding = inner.binding_log.get(name)
-        except Exception as exc:  # noqa: BLE001 — the adapter contract is "never raises"
+        except Exception as exc:  # noqa: BLE001 - the adapter contract is "never raises"
             return EnrichmentCallResult(
                 self.key,
                 entity_type,
@@ -166,6 +192,11 @@ class SnapshotReplayAdapter(ProviderAdapter):
 
 def _factory(source: str):
     def make(**overrides) -> SnapshotReplayAdapter:
+        unknown = set(overrides) - CONFIG_KEYS - _REGISTRY_KEYS
+        if unknown:  # e.g. snapshot_root or identity facts smuggled in through provider config
+            raise SnapshotConfigError(
+                f"config has {len(unknown)} unsupported key(s); allowed: {sorted(CONFIG_KEYS)}"
+            )
         return SnapshotReplayAdapter(source, **overrides)
 
     make.__name__ = f"make_snapshot_{source}"
