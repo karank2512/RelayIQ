@@ -11,7 +11,9 @@ Product-path rules (stricter than the offline SnapshotProvider):
 - No identity facts in the product path: facts are per-tenant assertions and there is no per-tenant store
   for them yet. Registry sources therefore bind only on an exact registrant website host equal to the
   account's own root domain; GLEIF records carry no website, so GLEIF always abstains here.
-- Wikidata answers only when a record's official website has the account's root domain.
+- Wikidata answers only when a record's official website host equals the account's domain exactly.
+- root_domain is never offered (the account's domain is an input); values that would not fit the account
+  columns are dropped, never truncated.
 - No account domain means no answer.
 - Leakage guard: a snapshot file may contain only the source sections {"sec", "gleif", "wikidata"};
   anything else (labels, answer keys, truth tables) is refused at load time, and so is any path outside
@@ -28,11 +30,12 @@ from pathlib import Path
 
 from relayiq.enums import EntityType, ProviderOutcome
 from relayiq.providers.base import EnrichmentCallResult, ProviderAdapter
-from relayiq.providers.public_sources import ACCOUNT_FIELDS_BY_SOURCE, SnapshotProvider
+from relayiq.providers.public_sources import ACCOUNT_FIELDS_BY_SOURCE, SnapshotProvider, _safe_host
 
 SNAPSHOT_ROOT_ENV = "RELAYIQ_SNAPSHOT_ROOT"
 SOURCES = ("sec", "gleif", "wikidata")
 MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024
+MAX_VALUE_CHARS = 120  # Account.hq_city / hq_state column width
 # The only ProviderConfig.config keys a snapshot row may carry. The snapshot root comes from the
 # environment only, never from config (admins can edit config through the API).
 CONFIG_KEYS = frozenset({"snapshot_file", "as_of", "display_name"})
@@ -123,7 +126,9 @@ class SnapshotReplayAdapter(ProviderAdapter):
         self._as_of = str(as_of)
         self.key = provider_key or source
         self.display_name = display_name or f"Snapshot replay ({source})"
-        supported = set(ACCOUNT_FIELDS_BY_SOURCE[source])
+        # root_domain is not offered: the account's own domain is a required input here, and the source's
+        # value is a raw website URL, not a normalised domain.
+        supported = set(ACCOUNT_FIELDS_BY_SOURCE[source]) - {"root_domain"}
         allowed = (
             supported
             if capabilities is None
@@ -138,44 +143,58 @@ class SnapshotReplayAdapter(ProviderAdapter):
         return 0.0
 
     def enrich(self, entity_type, identifiers, fields, *, timeout_ms: int = 8000) -> EnrichmentCallResult:
+        try:
+            return self._enrich(entity_type, identifiers, fields, timeout_ms)
+        except Exception as exc:  # noqa: BLE001 - the adapter contract is "never raises"
+            return self._fail(entity_type, f"snapshot replay failed ({type(exc).__name__})")
+
+    def _fail(self, entity_type, error: str) -> EnrichmentCallResult:
+        return EnrichmentCallResult(self.key, entity_type, ProviderOutcome.PERM_FAIL, error=error)
+
+    def _enrich(self, entity_type, identifiers, fields, timeout_ms: int) -> EnrichmentCallResult:
         if entity_type != EntityType.ACCOUNT.value:
-            return EnrichmentCallResult(
-                self.key, entity_type, ProviderOutcome.PERM_FAIL, error="unsupported entity type"
-            )
+            return self._fail(entity_type, "unsupported entity type")
         name = str(identifiers.get("company_name") or identifiers.get("name") or "").strip()
         domain = str(identifiers.get("root_domain") or identifiers.get("website") or "").strip()
-        wanted = [f for f in fields if f in self._fields]
+        wanted = [f for f in list(fields or []) if f in self._fields]
         if not name or not domain:
-            return EnrichmentCallResult(
-                self.key,
-                entity_type,
-                ProviderOutcome.PERM_FAIL,
-                error="company name and account domain are required",
-            )
+            return self._fail(entity_type, "company name and account domain are required")
         if not wanted:
-            return EnrichmentCallResult(
-                self.key, entity_type, ProviderOutcome.PERM_FAIL, error="no supported fields requested"
-            )
-        try:
-            inner = SnapshotProvider(
-                self._source,
-                self.display_name,
-                None,
-                self._as_of,
-                records=self._records,
-                input_domains={name: domain},
-            )
-            result = inner.enrich(entity_type, {"company_name": name}, wanted, timeout_ms=timeout_ms)
-            binding = inner.binding_log.get(name)
-        except Exception as exc:  # noqa: BLE001 - the adapter contract is "never raises"
-            return EnrichmentCallResult(
-                self.key,
-                entity_type,
-                ProviderOutcome.PERM_FAIL,
-                error=f"snapshot replay failed ({type(exc).__name__})",
-            )
+            return self._fail(entity_type, "no supported fields requested")
+        rec = self._records.get(name)
+        if rec is None:
+            return self._fail(entity_type, "no matching record")
+        if self._source == "wikidata":
+            # Exact host only: the offline provider compares root domains, which can treat unrelated sites
+            # under a shared suffix (e.g. two hosts under github.io) as the same company.
+            want, _ = _safe_host(domain)
+            details = [
+                d
+                for d in (rec.get("details") or [])
+                if want and isinstance(d, dict) and _safe_host(d.get("website"))[0] == want
+            ]
+            rec = dict(rec, details=details)
+        inner = SnapshotProvider(
+            self._source,
+            self.display_name,
+            None,
+            self._as_of,
+            records={name: rec},
+            input_domains={name: domain},
+        )
+        result = inner.enrich(entity_type, {"company_name": name}, wanted, timeout_ms=timeout_ms)
+        binding = inner.binding_log.get(name)
         result.provider_key = self.key
-        if not result.ok:
+        # Values must fit the account columns they are written to; never truncate (that would invent a value).
+        result.fields = {
+            f: v
+            for f, v in result.fields.items()
+            if len(str(v.value)) <= MAX_VALUE_CHARS and "\x00" not in str(v.value)
+        }
+        if result.ok and not result.fields:
+            result.outcome = ProviderOutcome.PERM_FAIL
+            result.error = "no usable value"
+        if not result.ok and result.error != "no usable value":
             # Short, stable error (stored in a bounded column); the detailed reason stays in raw_payload.
             if binding is not None and binding.get("state") == "abstain":
                 result.error = "identity not bound; needs review"

@@ -435,3 +435,152 @@ class TestRegistryWiring:
             )
         )
         assert reg.all() == {}
+
+
+# ---------------------------------------------------------------- output safety
+class TestOutputSafety:
+    def test_root_domain_is_not_offered(self, root):
+        # the account's domain is an input here, and the source value is a raw website URL
+        assert make("sec", root).capabilities() == {"account": {"hq_city", "hq_state"}}
+        assert make("wikidata", root).capabilities() == {"account": {"hq_city", "hq_state", "founded_year"}}
+        r = make("sec", root).enrich("account", ACME, ["root_domain"])
+        assert r.error == "no supported fields requested"
+
+    def test_wikidata_needs_the_exact_host_not_a_shared_suffix(self, tmp_path):
+        snap = {
+            "wikidata": {
+                "Acme": {
+                    "candidates": [],
+                    "chosen": None,
+                    "details": [
+                        {
+                            "id": "Q7",
+                            "label": "Acme",
+                            "desc": "software company",
+                            "website": "https://unrelated-site.github.io",
+                            "hq_city": "Wrongville",
+                            "hq_state": "TX",
+                        }
+                    ],
+                }
+            }
+        }
+        (tmp_path / "w.json").write_text(json.dumps(snap))
+        a = SA.SnapshotReplayAdapter(
+            "wikidata", snapshot_file="w.json", as_of="2026-11-20", snapshot_root=str(tmp_path)
+        )
+        r = a.enrich("account", {"company_name": "Acme", "root_domain": "acme.github.io"}, ["hq_city"])
+        assert r.outcome == ProviderOutcome.PERM_FAIL and r.fields == {}
+        ok = a.enrich(
+            "account", {"company_name": "Acme", "root_domain": "www.unrelated-site.github.io"}, ["hq_city"]
+        )
+        assert ok.fields["hq_city"].value == "Wrongville"  # exact host (www. ignored) still binds
+
+    def test_values_that_do_not_fit_are_dropped_not_truncated(self, tmp_path):
+        chosen = dict(SNAP["sec"]["Acme"]["chosen"], hq_city="x" * 121, hq_state="C\x00A")
+        (tmp_path / "v.json").write_text(json.dumps({"sec": {"Acme": {"chosen": chosen}}}))
+        a = SA.SnapshotReplayAdapter(
+            "sec", snapshot_file="v.json", as_of="2026-11-20", snapshot_root=str(tmp_path)
+        )
+        r = a.enrich("account", ACME, ["hq_city", "hq_state"])
+        assert r.outcome == ProviderOutcome.PERM_FAIL and r.fields == {} and r.error == "no usable value"
+        chosen["hq_state"] = "CA"
+        (tmp_path / "v.json").write_text(json.dumps({"sec": {"Acme": {"chosen": chosen}}}) + " ")
+        a = SA.SnapshotReplayAdapter(
+            "sec", snapshot_file="v.json", as_of="2026-11-20", snapshot_root=str(tmp_path)
+        )
+        r = a.enrich("account", ACME, ["hq_city", "hq_state"])
+        assert r.ok and set(r.fields) == {"hq_state"}
+
+    def test_absent_company_is_no_matching_record(self, root):
+        for source in ("sec", "gleif", "wikidata"):
+            r = make(source, root).enrich(
+                "account", {"company_name": "Nobody", "root_domain": "nobody.example"}, ["hq_city"]
+            )
+            assert r.error == "no matching record", source
+
+    def test_never_raises_on_odd_inputs(self, root):
+        a = make("sec", root)
+        assert a.enrich("account", ACME, None).error == "no supported fields requested"
+        r = a.enrich("account", {"company_name": 123, "root_domain": ["x"]}, ["hq_city"])
+        assert r.outcome == ProviderOutcome.PERM_FAIL
+
+    def test_raw_payload_carries_only_state_reason_basis(self, root):
+        r = make("sec", root).enrich("account", ACME, ["hq_city"])
+        assert set(r.raw_payload) == {"identity_binding"}
+        assert set(r.raw_payload["identity_binding"]) <= {"state", "reason", "basis"}
+
+    def test_non_object_snapshot_is_refused(self, tmp_path):
+        (tmp_path / "l.json").write_text("[1, 2]")
+        with pytest.raises(SA.SnapshotConfigError, match="must be a JSON object"):
+            SA.SnapshotReplayAdapter(
+                "sec", snapshot_file="l.json", as_of="2026-11-20", snapshot_root=str(tmp_path)
+            )
+
+    def test_offline_provider_needs_exactly_one_source(self, root):
+        from relayiq.providers.public_sources import SnapshotProvider
+
+        with pytest.raises(ValueError, match="exactly one"):
+            SnapshotProvider("sec", "sec", None, "2026-11-20")
+        with pytest.raises(ValueError, match="exactly one"):
+            SnapshotProvider("sec", "sec", os.path.join(root, "snap.json"), "2026-11-20", records={})
+
+
+# ---------------------------------------------------------------- stored error text (provider_exec call site)
+class TestStoredErrorIsBounded:
+    def test_long_provider_error_is_bounded_where_the_request_row_is_built(self, monkeypatch):
+        from relayiq.enums import ProviderOutcome as PO
+        from relayiq.models import ProviderRequest
+        from relayiq.providers.base import EnrichmentCallResult, ProviderAdapter
+
+        class LongError(ProviderAdapter):
+            key = "long"
+
+            def capabilities(self):
+                return {"account": {"hq_city"}}
+
+            def field_cost(self, entity_type, field_name):
+                return 0.0
+
+            def enrich(self, entity_type, identifiers, fields, *, timeout_ms=8000):
+                return EnrichmentCallResult("long", entity_type, PO.PERM_FAIL, error="e" * 500)
+
+        class Breaker:
+            def allow(self):
+                return True
+
+            def record_success(self):
+                pass
+
+            def record_failure(self):
+                pass
+
+        class Reg:
+            def breaker(self, key):
+                return Breaker()
+
+        class Sess:
+            def __init__(self):
+                self.added = []
+
+            def add(self, obj):
+                self.added.append(obj)
+
+            def flush(self):
+                pass
+
+        monkeypatch.setattr(provider_exec, "_record_health", lambda *a, **k: None)
+        s = Sess()
+        result, req = provider_exec.execute_with_retries(
+            s,
+            Reg(),
+            LongError(),
+            tenant_id="t",
+            job_id=None,
+            entity_type="account",
+            entity_id="e",
+            identifiers={},
+            fields=["hq_city"],
+        )
+        assert isinstance(req, ProviderRequest) and req in s.added
+        assert len(req.error_type) == provider_exec.ERROR_TYPE_MAX
